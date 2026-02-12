@@ -12,24 +12,15 @@ Waveshare UGV Rover (4WD skid-steer) 위에 RoArm-M2 (4-DOF + gripper) 로봇팔
 - **RViz 시각화** - 직접 TF 퍼블리싱을 통한 로봇 제어 (Gazebo 없이)
 - **SLAM** - slam_toolbox를 이용한 실시간 맵 생성
 
-## Dependencies
+## Prerequisites
 
-### 소스 패키지 (같은 워크스페이스에 필요)
+### ROS 2 환경
 
-이 패키지는 UGV Rover의 메시 파일(`package://ugv_description/meshes/...`)을 참조하므로,
-[ugv_ws](https://github.com/waveshareteam/ugv_ws)의 `ugv_description` 패키지가 같은 워크스페이스에 있어야 합니다.
-
-```bash
-# ugv_ws를 이미 클론한 경우, 그 안에 이 패키지를 배치
-cd ~/ugv_ws/src
-git clone https://github.com/fhekwn549/ugv_roarm_description.git
-```
-
-Gazebo 시뮬레이션 사용 시, 소스 빌드 버전의 `gazebo_ros2_control`이 필요합니다:
+ROS 2 Humble이 설치되어 있어야 합니다. 아직 설치하지 않았다면 [공식 설치 가이드](https://docs.ros.org/en/humble/Installation.html)를 참조하세요.
 
 ```bash
-cd ~/ugv_ws/src
-git clone -b humble https://github.com/ros-controls/gazebo_ros2_control.git
+# 매 터미널마다 ROS 2 환경을 불러와야 합니다 (또는 .bashrc에 추가)
+source /opt/ros/humble/setup.bash
 ```
 
 ### apt 패키지
@@ -41,6 +32,27 @@ sudo apt install ros-humble-gazebo-ros ros-humble-gazebo-ros2-control \
   ros-humble-robot-state-publisher ros-humble-joint-state-publisher-gui
 ```
 
+### 워크스페이스 및 소스 패키지 설정
+
+이 패키지는 **단독으로 사용할 수 없습니다.** UGV Rover의 메시 파일(`package://ugv_description/meshes/...`)을 참조하므로, Waveshare의 `ugv_description` 패키지가 같은 워크스페이스에 있어야 합니다.
+
+```bash
+# 1. ugv_ws 워크스페이스 클론 (ugv_description 포함)
+cd ~
+git clone https://github.com/waveshareteam/ugv_ws.git
+cd ~/ugv_ws/src
+
+# 2. 이 패키지 클론
+git clone https://github.com/fhekwn549/ugv_roarm_description.git
+
+# 3. Gazebo 시뮬레이션을 사용하려면 gazebo_ros2_control 소스 빌드 필요
+git clone -b humble https://github.com/ros-controls/gazebo_ros2_control.git
+```
+
+> **참고**: `ugv_ws`의 디렉토리 구조에 따라 패키지 경로가 다를 수 있습니다.
+> `ugv_description` 패키지가 `colcon build`로 빌드 가능하고
+> `source install/setup.bash` 후 `ros2 pkg prefix ugv_description`이 정상 출력되면 됩니다.
+
 ## Build
 
 ```bash
@@ -49,36 +61,93 @@ colcon build --packages-select ugv_roarm_description --symlink-install
 source install/setup.bash
 ```
 
-## Usage
-
-### 1. RViz 시각화
+빌드가 성공했는지 확인:
 
 ```bash
-# GUI 슬라이더로 관절 조작
-ros2 launch ugv_roarm_description display.launch.py
+ros2 pkg prefix ugv_roarm_description
+# 정상이면 /home/<user>/ugv_ws/install/ugv_roarm_description 출력
+```
 
-# 키보드 텔레옵으로 조작 (터미널 2개 사용)
+## Usage
+
+### 1. RViz 시각화 (GUI 슬라이더)
+
+가장 간단한 방법. 슬라이더로 관절을 드래그하여 로봇 모델을 확인합니다.
+
+```bash
+source ~/ugv_ws/install/setup.bash
+ros2 launch ugv_roarm_description display.launch.py
+```
+
+RViz 창이 열리고 로봇 모델이 표시됩니다. 왼쪽 `joint_state_publisher_gui` 패널에서 슬라이더를 움직이면 관절이 회전합니다.
+
+### 2. RViz 키보드 텔레옵
+
+**터미널 2개**가 필요합니다.
+
+**터미널 1** — RViz 실행 (GUI 슬라이더 비활성화):
+
+```bash
+source ~/ugv_ws/install/setup.bash
 ros2 launch ugv_roarm_description display.launch.py use_gui:=false use_jsp:=false
+```
+
+**터미널 2** — 텔레옵 실행:
+
+```bash
+source ~/ugv_ws/install/setup.bash
 ros2 run ugv_roarm_description teleop_all.py --ros-args -p mode:=rviz
 ```
 
-### 2. Gazebo 시뮬레이션
+터미널 2에 키 안내 배너가 출력되면, 해당 터미널에 포커스를 두고 키보드를 누릅니다.
+
+#### Fixed Frame 설정 (중요)
+
+텔레옵 RViz 모드는 `odom → base_footprint → ...` TF 트리를 직접 퍼블리시합니다.
+RViz 좌측 **Displays** 패널 → **Global Options** → **Fixed Frame**을 용도에 맞게 설정하세요:
+
+| Fixed Frame | 동작 | 용도 |
+|---|---|---|
+| `odom` | 로봇이 월드 공간에서 이동 (W/S/A/D로 주행 시 로봇이 움직임) | 주행 테스트 |
+| `base_footprint` | 로봇이 항상 화면 중앙에 고정 (배경이 움직임) | 팔 조작에 집중할 때 |
+
+> **Tip**: 기본값은 `base_footprint`입니다. 주행을 확인하려면 RViz에서 Fixed Frame을 `odom`으로 변경하세요.
+
+### 3. Gazebo 시뮬레이션
+
+**터미널 2개**가 필요합니다.
+
+**터미널 1** — Gazebo 실행:
 
 ```bash
-# Gazebo 실행 (GUI 포함)
+source ~/ugv_ws/install/setup.bash
 ros2 launch ugv_roarm_description gazebo.launch.py
+```
 
-# 다른 터미널에서 텔레옵
+> WSL2에서는 Gazebo 플러그인 초기화에 약 2분이 소요됩니다. 로그가 멈춘 것처럼 보여도 기다려 주세요.
+
+**터미널 2** — 텔레옵 실행:
+
+```bash
+source ~/ugv_ws/install/setup.bash
 ros2 run ugv_roarm_description teleop_all.py
 ```
 
-### 3. SLAM 맵핑
+### 4. SLAM 맵핑
+
+**터미널 2개**가 필요합니다.
+
+**터미널 1** — Gazebo + slam_toolbox + RViz 통합 실행:
 
 ```bash
-# Gazebo + slam_toolbox + RViz 통합 실행
+source ~/ugv_ws/install/setup.bash
 ros2 launch ugv_roarm_description slam.launch.py
+```
 
-# 다른 터미널에서 텔레옵으로 주행하며 맵 생성
+**터미널 2** — 텔레옵으로 주행하며 맵 생성:
+
+```bash
+source ~/ugv_ws/install/setup.bash
 ros2 run ugv_roarm_description teleop_all.py
 ```
 
@@ -146,6 +215,16 @@ ugv_roarm_description/
 | `/scan` | `sensor_msgs/LaserScan` | 2D LiDAR |
 | `/odom` | `nav_msgs/Odometry` | 오도메트리 |
 | `/map` | `nav_msgs/OccupancyGrid` | SLAM 맵 |
+
+## Troubleshooting
+
+| 증상 | 원인 | 해결 |
+|------|------|------|
+| RViz에서 로봇이 안 보임 | `ugv_description` 미빌드 | `colcon build`로 ugv_description 포함 빌드 후 `source install/setup.bash` |
+| `Fixed Frame [base_footprint] does not exist` | 텔레옵 미실행 | 터미널 2에서 `teleop_all.py --ros-args -p mode:=rviz` 실행 |
+| W/S 키로 주행해도 로봇이 안 움직임 | Fixed Frame이 `base_footprint` | RViz에서 Fixed Frame을 `odom`으로 변경 |
+| Gazebo에서 로봇이 바닥을 뚫고 떨어짐 | 메시 로드 실패 | `GAZEBO_MODEL_PATH` 설정 확인 (launch 파일에서 자동 설정됨) |
+| WSL2에서 Gazebo GUI 크래시 | D3D12 호환성 문제 | `gui:=false` 옵션으로 headless 실행 |
 
 ## Notes
 
