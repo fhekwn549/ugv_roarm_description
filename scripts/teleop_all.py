@@ -107,19 +107,41 @@ DYNAMIC_JOINTS = [
      'right_down_wheel_link_joint', -1),
 ]
 
-BANNER_TEMPLATE = """
+BANNER_JOINT = """
 =========================================
   Unified Teleop  (simultaneous control)
-  Mode: {mode}
+  Mode: {mode}  |  Arm: JOINT mode
 =========================================
   [Drive]  w/s : forward / back
            a/d : turn left / right
            q/e : speed  +/-
          Space : emergency stop
 
-  [Arm]  1/2/3 : select joint
+  [Arm]  1/2/3 : select joint 1~3
            i/k : joint  +/-
            u/j : step size +/-
+             m : switch to TCP mode
+
+  [Gripper] o  : gripper +
+            p  : gripper -
+
+  Ctrl+C : quit
+========================================="""
+
+BANNER_TCP = """
+=========================================
+  Unified Teleop  (simultaneous control)
+  Mode: {mode}  |  Arm: TCP mode
+=========================================
+  [Drive]  w/s : forward / back
+           a/d : turn left / right
+           q/e : speed  +/-
+         Space : emergency stop
+
+  [Arm]  1/2/3 : select axis X/Y/Z
+           i/k : TCP  +/- (mm)
+           u/j : step size +/-
+             m : switch to Joint mode
 
   [Gripper] o  : gripper +
             p  : gripper -
@@ -171,6 +193,61 @@ def clamp(val, lo, hi):
     return max(lo, min(hi, val))
 
 
+# ── IK/FK for roarm_m2 (ported from solver.hpp) ──────────────
+L2A, L2B = 236.82, 30.00
+L3A, L3B = 280.15, 1.73
+L2 = math.sqrt(L2A**2 + L2B**2)
+L3 = math.sqrt(L3A**2 + L3B**2)
+T2RAD = math.atan2(L2B, L2A)
+T3RAD = math.atan2(L3B, L3A)
+
+TCP_AXIS_NAMES = ['X', 'Y', 'Z']
+
+
+def fk_m2(base, shoulder, elbow):
+    """FK: joint angles (rad) -> TCP position (mm). Ported from solver.hpp computePosbyJointRad (EEMode=0)."""
+    aOut = L2 * math.cos(math.pi / 2 - (shoulder + T2RAD))
+    bOut = L2 * math.sin(math.pi / 2 - (shoulder + T2RAD))
+    cOut = L3 * math.cos(math.pi / 2 - (elbow + shoulder + T3RAD))
+    dOut = L3 * math.sin(math.pi / 2 - (elbow + shoulder + T3RAD))
+    r_ee = aOut + cOut
+    z_ee = bOut + dOut
+    x_ee = r_ee * math.cos(base)
+    y_ee = r_ee * math.sin(base)
+    return (x_ee, y_ee, z_ee)
+
+
+def ik_m2(x, y, z):
+    """IK: TCP position (mm) -> joint angles (rad). Ported from solver.hpp computeJointRadbyPos."""
+    r = math.sqrt(x * x + y * y)
+    base_angle = math.atan2(y, x)
+    LA, LB = L2, L3
+    if abs(z) < 1e-6:
+        cos_psi = (LA * LA + r * r - LB * LB) / (2 * LA * r)
+        cos_omega = (r * r + LB * LB - LA * LA) / (2 * r * LB)
+        if abs(cos_psi) > 1.0 or abs(cos_omega) > 1.0:
+            return None
+        psi = math.acos(cos_psi) + T2RAD
+        alpha = math.pi / 2.0 - psi
+        omega = math.acos(cos_omega)
+        beta = psi + omega - T3RAD
+    else:
+        L2C = r * r + z * z
+        LC = math.sqrt(L2C)
+        lam = math.atan2(z, r)
+        cos_psi = (LA * LA + L2C - LB * LB) / (2 * LA * LC)
+        cos_omega = (LB * LB + L2C - LA * LA) / (2 * LC * LB)
+        if abs(cos_psi) > 1.0 or abs(cos_omega) > 1.0:
+            return None
+        psi = math.acos(cos_psi) + T2RAD
+        alpha = math.pi / 2.0 - lam - psi
+        omega = math.acos(cos_omega)
+        beta = psi + omega - T3RAD
+    if math.isnan(alpha) or math.isnan(beta):
+        return None
+    return (base_angle, alpha, beta)
+
+
 class TeleopAll(Node):
     def __init__(self):
         super().__init__('teleop_all')
@@ -192,6 +269,9 @@ class TeleopAll(Node):
         self.turn_speed = 0.5
         self.selected_joint = 0
         self.arm_step = 0.05
+        self.arm_control_mode = 'joint'  # 'joint' | 'tcp'
+        self.selected_axis = 0           # 0=X, 1=Y, 2=Z
+        self.tcp_step = 10.0             # mm
         self.settings = termios.tcgetattr(sys.stdin)
 
         # ── Publishers (both modes) ──────────────────────────
@@ -266,6 +346,43 @@ class TeleopAll(Node):
             traj.points = [pt]
             self.arm_pub.publish(traj)
 
+    # ── TCP move ──────────────────────────────────────────────
+    def move_tcp(self, direction: int):
+        base = self.joint_positions[ARM_JOINTS[0]]
+        shoulder = self.joint_positions[ARM_JOINTS[1]]
+        elbow = self.joint_positions[ARM_JOINTS[2]]
+        x, y, z = fk_m2(base, shoulder, elbow)
+        delta = direction * self.tcp_step
+        if self.selected_axis == 0:
+            x += delta
+        elif self.selected_axis == 1:
+            y += delta
+        else:
+            z += delta
+        result = ik_m2(x, y, z)
+        if result is None:
+            return
+        new_base, new_shoulder, new_elbow = result
+        new_joints = {
+            ARM_JOINTS[0]: new_base,
+            ARM_JOINTS[1]: new_shoulder,
+            ARM_JOINTS[2]: new_elbow,
+        }
+        for jname, val in new_joints.items():
+            lo, hi = JOINT_LIMITS[jname]
+            new_joints[jname] = clamp(val, lo, hi)
+        for jname, val in new_joints.items():
+            self.joint_positions[jname] = val
+        if self.mode == 'gazebo':
+            positions = [self.joint_positions[j] for j in ARM_JOINTS]
+            traj = JointTrajectory()
+            traj.joint_names = list(ARM_JOINTS)
+            pt = JointTrajectoryPoint()
+            pt.positions = positions
+            pt.time_from_start = Duration(sec=0, nanosec=200_000_000)
+            traj.points = [pt]
+            self.arm_pub.publish(traj)
+
     # ── Gripper ───────────────────────────────────────────────
     def move_gripper(self, direction: int):
         lo, hi = JOINT_LIMITS[GRIPPER_JOINT]
@@ -327,21 +444,32 @@ class TeleopAll(Node):
 
     # ── Status line ───────────────────────────────────────────
     def print_status(self):
-        jname = ARM_JOINTS[self.selected_joint]
-        jpos = self.joint_positions[jname]
         gpos = self.joint_positions[GRIPPER_JOINT]
-        sys.stdout.write(
-            f'\r  Drive: spd={self.drive_speed:.2f} turn={self.turn_speed:.2f}'
-            f'  |  Arm: J{self.selected_joint+1}({jname.split("_to_")[1]}) '
-            f'pos={jpos:.2f} step={self.arm_step:.3f}'
-            f'  |  Grip: {gpos:.2f}  ')
+        drive_str = f'Drive: spd={self.drive_speed:.2f} turn={self.turn_speed:.2f}'
+        grip_str = f'Grip: {gpos:.2f}'
+        if self.arm_control_mode == 'joint':
+            jname = ARM_JOINTS[self.selected_joint]
+            jpos = self.joint_positions[jname]
+            arm_str = (f'Arm[Joint]: J{self.selected_joint+1}'
+                       f'({jname.split("_to_")[1]}) '
+                       f'pos={jpos:.2f} step={self.arm_step:.3f}')
+        else:
+            base = self.joint_positions[ARM_JOINTS[0]]
+            shoulder = self.joint_positions[ARM_JOINTS[1]]
+            elbow = self.joint_positions[ARM_JOINTS[2]]
+            tx, ty, tz = fk_m2(base, shoulder, elbow)
+            axis = TCP_AXIS_NAMES[self.selected_axis]
+            arm_str = (f'Arm[TCP]: {axis} '
+                       f'tcp=({tx:.1f}, {ty:.1f}, {tz:.1f})mm '
+                       f'step={self.tcp_step:.1f}mm')
+        sys.stdout.write(f'\r  {drive_str}  |  {arm_str}  |  {grip_str}  ')
         sys.stdout.flush()
 
 
 def main():
     rclpy.init()
     node = TeleopAll()
-    print(BANNER_TEMPLATE.format(mode=node.mode.upper()))
+    print(BANNER_JOINT.format(mode=node.mode.upper()))
     node.print_status()
 
     x = 0.0
@@ -372,21 +500,47 @@ def main():
             elif key == ' ':
                 x, th, count = 0.0, 0.0, 0
 
+            # ── Arm mode toggle ───────────────────────────────
+            elif key == 'm':
+                if node.arm_control_mode == 'joint':
+                    node.arm_control_mode = 'tcp'
+                    banner = BANNER_TCP
+                else:
+                    node.arm_control_mode = 'joint'
+                    banner = BANNER_JOINT
+                print(banner.format(mode=node.mode.upper()))
+                node.print_status()
+
             # ── Arm keys ──────────────────────────────────────
             elif key in ('1', '2', '3'):
-                node.selected_joint = int(key) - 1
+                if node.arm_control_mode == 'joint':
+                    node.selected_joint = int(key) - 1
+                else:
+                    node.selected_axis = int(key) - 1
                 node.print_status()
             elif key == 'i':
-                node.move_arm_joint(+1)
+                if node.arm_control_mode == 'joint':
+                    node.move_arm_joint(+1)
+                else:
+                    node.move_tcp(+1)
                 node.print_status()
             elif key == 'k':
-                node.move_arm_joint(-1)
+                if node.arm_control_mode == 'joint':
+                    node.move_arm_joint(-1)
+                else:
+                    node.move_tcp(-1)
                 node.print_status()
             elif key == 'u':
-                node.arm_step = min(node.arm_step * 1.5, 0.5)
+                if node.arm_control_mode == 'joint':
+                    node.arm_step = min(node.arm_step * 1.5, 0.5)
+                else:
+                    node.tcp_step = min(node.tcp_step * 1.5, 100.0)
                 node.print_status()
             elif key == 'j':
-                node.arm_step = max(node.arm_step / 1.5, 0.005)
+                if node.arm_control_mode == 'joint':
+                    node.arm_step = max(node.arm_step / 1.5, 0.005)
+                else:
+                    node.tcp_step = max(node.tcp_step / 1.5, 1.0)
                 node.print_status()
 
             # ── Gripper keys ──────────────────────────────────
