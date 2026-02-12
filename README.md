@@ -8,11 +8,31 @@ Waveshare UGV Rover (4WD skid-steer) 위에 RoArm-M2 (4-DOF + gripper) 로봇팔
 
 - **통합 URDF/Xacro** - UGV Rover 베이스 + RoArm-M2 매니퓰레이터 + 센서(2D LiDAR, Depth Camera, IMU)
 - **Gazebo Classic 시뮬레이션** - ros2_control 기반 관절 제어, skid-steer 주행
-- **통합 키보드 텔레옵** - 주행 + 팔 + 그리퍼 동시 제어 (모드 전환 없음)
+- **통합 키보드 텔레옵** - 주행 + 팔 + 그리퍼 동시 제어, Joint/TCP 모드 지원
 - **RViz 시각화** - 직접 TF 퍼블리싱을 통한 로봇 제어 (Gazebo 없이)
 - **SLAM** - slam_toolbox를 이용한 실시간 맵 생성
 
 ## Dependencies
+
+### 소스 패키지 (같은 워크스페이스에 필요)
+
+이 패키지는 UGV Rover의 메시 파일(`package://ugv_description/meshes/...`)을 참조하므로,
+[ugv_ws](https://github.com/waveshareteam/ugv_ws)의 `ugv_description` 패키지가 같은 워크스페이스에 있어야 합니다.
+
+```bash
+# ugv_ws를 이미 클론한 경우, 그 안에 이 패키지를 배치
+cd ~/ugv_ws/src
+git clone https://github.com/fhekwn549/ugv_roarm_description.git
+```
+
+Gazebo 시뮬레이션 사용 시, 소스 빌드 버전의 `gazebo_ros2_control`이 필요합니다:
+
+```bash
+cd ~/ugv_ws/src
+git clone -b humble https://github.com/ros-controls/gazebo_ros2_control.git
+```
+
+### apt 패키지
 
 ```bash
 sudo apt install ros-humble-gazebo-ros ros-humble-gazebo-ros2-control \
@@ -20,9 +40,6 @@ sudo apt install ros-humble-gazebo-ros ros-humble-gazebo-ros2-control \
   ros-humble-gripper-controllers ros-humble-xacro ros-humble-slam-toolbox \
   ros-humble-robot-state-publisher ros-humble-joint-state-publisher-gui
 ```
-
-이 패키지는 [ugv_description](https://github.com/waveshareteam/ugv_ws) 패키지의 메시 파일을 참조합니다.
-`ugv_ws` 워크스페이스 내에 함께 빌드해야 합니다.
 
 ## Build
 
@@ -67,7 +84,7 @@ ros2 run ugv_roarm_description teleop_all.py
 
 ## Keyboard Controls
 
-주행과 팔 제어가 **동시에** 가능합니다.
+주행과 팔 제어가 **동시에** 가능합니다. `M` 키로 팔 제어 모드를 전환합니다.
 
 | Key | Function |
 |-----|----------|
@@ -77,11 +94,21 @@ ros2 run ugv_roarm_description teleop_all.py
 | `Q` / `E` | Increase / Decrease speed |
 | `Space` | Emergency Stop |
 | **Arm** | |
-| `1` / `2` / `3` | Select Joint 1~3 |
-| `I` / `K` | Selected joint +/- |
-| `U` / `J` | Increase / Decrease step size |
+| `M` | Joint ↔ TCP 모드 전환 |
+| `1` / `2` / `3` | Joint 모드: 관절 1~3 선택 / TCP 모드: X/Y/Z 축 선택 |
+| `I` / `K` | Joint 모드: 관절 +/- / TCP 모드: 선택 축 +/- (mm) |
+| `U` / `J` | Step size +/- |
 | **Gripper** | |
 | `O` / `P` | Gripper open(+) / close(-) |
+
+### TCP 제어 모드
+
+TCP(Tool Center Point) 모드에서는 로봇팔 끝단의 직교 좌표(X, Y, Z)를 직접 제어합니다.
+내부적으로 `roarm_moveit_cmd/solver.hpp`의 `roarm_m2` IK/FK 솔버를 Python으로 포팅하여 사용합니다.
+
+- **FK**: 현재 관절 각도 → TCP 위치(mm) 계산
+- **IK**: 목표 TCP 위치 → 관절 각도 역변환
+- 도달 불가능한 위치로의 이동 명령은 자동으로 무시됩니다
 
 ## Package Structure
 
