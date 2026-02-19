@@ -4,12 +4,28 @@ ROS 2 Humble package for the **UGV Rover + RoArm-M2** mobile manipulator.
 
 Waveshare UGV Rover (4WD skid-steer) 위에 RoArm-M2 (4-DOF + gripper) 로봇팔을 통합한 URDF 모델, 시뮬레이션, 키보드 텔레옵 패키지입니다.
 
+## 이 리포의 역할
+
+**로봇이 무엇인지 정의하고, 어떻게 실행할지 구성**하는 패키지입니다. URDF 모델, launch 파일, 시뮬레이션 설정, 텔레옵 스크립트를 포함합니다.
+
+WSL(Gazebo/RViz 시뮬레이션)과 RPi(실제 하드웨어) **양쪽에서 모두 사용**됩니다. RPi에서 필요한 것은 주로 `rasp_bringup.launch.py`와 URDF이며, Gazebo/RViz 관련 파일은 RPi에서 사용되지 않지만 한 리포로 관리합니다.
+
+### 리포 구조
+
+| 리포 | 역할 | 내용 |
+|------|------|------|
+| **이 리포 (`ugv_roarm_description`)** | 로봇 정의 + 실행 구성 | URDF, launch, Gazebo 시뮬레이션, 텔레옵 |
+| [fhekwn549/ugv_ws](https://github.com/fhekwn549/ugv_ws) | 하드웨어 구동 | 시리얼 드라이버, 센서 처리, 오도메트리 |
+
+RPi에서는 두 리포 모두 필요합니다. 이 리포의 `rasp_bringup.launch.py`가 `ugv_ws`의 드라이버 노드들을 실행합니다.
+
 ## Features
 
 - **통합 URDF/Xacro** - UGV Rover 베이스 + RoArm-M2 매니퓰레이터 + 센서(2D LiDAR, Depth Camera, IMU)
 - **Gazebo Classic 시뮬레이션** - ros2_control 기반 관절 제어, skid-steer 주행
 - **통합 키보드 텔레옵** - 주행 + 팔 + 그리퍼 동시 제어, Joint/TCP 모드 지원
 - **RViz 시각화** - 직접 TF 퍼블리싱을 통한 로봇 제어 (Gazebo 없이)
+- **RPi 하드웨어 통합 실행** - `rasp_bringup.launch.py`로 바퀴 + 팔 + LiDAR 한 번에 실행
 - **SLAM** - slam_toolbox를 이용한 실시간 맵 생성
 
 ## Prerequisites
