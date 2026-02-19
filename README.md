@@ -185,7 +185,29 @@ source ~/ugv_ws/install/setup.bash
 ros2 run ugv_roarm_description teleop_all.py
 ```
 
-### 4. SLAM 맵핑
+### 4. RPi 실제 하드웨어 실행
+
+모든 하드웨어 노드를 한 번에 실행합니다.
+
+```bash
+source ~/ugv_ws/install/setup.bash
+ros2 launch ugv_roarm_description rasp_bringup.launch.py
+```
+
+실행되는 노드:
+
+| 노드 | 역할 |
+|------|------|
+| `robot_state_publisher` | URDF → TF 발행 |
+| `ugv_bringup` | ESP32 센서 피드백 (IMU, 엔코더, 전압) |
+| `ugv_driver` | `/cmd_vel` → 바퀴 제어 (`/dev/ttyAMA0`) |
+| `base_node` | 오도메트리 + TF |
+| `roarm_driver` | `/arm_controller/joint_trajectory` → 팔 제어 (`/dev/ttyUSB0`) |
+| `ldlidar_ros2` | LiDAR 스캔 (`/dev/ttyUSB1`) |
+
+`roarm_driver`는 `ugv_bringup` 패키지에 포함되어 있으며, ESP32 시리얼 프로토콜(T:102/105/106)을 통해 RoArm-M2를 제어합니다.
+
+### 5. SLAM 맵핑
 
 **터미널 2개**가 필요합니다.
 
@@ -241,7 +263,8 @@ ugv_roarm_description/
 ├── launch/
 │   ├── display.launch.py          # RViz 시각화
 │   ├── gazebo.launch.py           # Gazebo 시뮬레이션
-│   └── slam.launch.py             # SLAM 맵핑
+│   ├── slam.launch.py             # SLAM 맵핑
+│   └── rasp_bringup.launch.py    # RPi 하드웨어 통합 실행
 ├── config/
 │   ├── ugv_arm_controllers.yaml   # ros2_control 컨트롤러 설정
 │   ├── ugv_arm_ros2_control.xacro # ros2_control 하드웨어 인터페이스
@@ -262,7 +285,8 @@ ugv_roarm_description/
 |-------|------|-------------|
 | `/cmd_vel` | `geometry_msgs/Twist` | 주행 속도 명령 |
 | `/arm_controller/joint_trajectory` | `trajectory_msgs/JointTrajectory` | 팔 관절 목표 |
-| `/gripper_controller/gripper_cmd` | `control_msgs/GripperCommand` | 그리퍼 제어 |
+| `/gripper_controller/gripper_cmd` | `control_msgs/GripperCommand` | 그리퍼 제어 (Gazebo) |
+| `/roarm/gripper_cmd` | `std_msgs/Float64` | 그리퍼 제어 (실물) |
 | `/joint_states` | `sensor_msgs/JointState` | 관절 상태 |
 | `/scan` | `sensor_msgs/LaserScan` | 2D LiDAR |
 | `/odom` | `nav_msgs/Odometry` | 오도메트리 |
