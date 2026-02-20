@@ -299,25 +299,29 @@ teleop_all.py                                  rasp_bringup.launch.py
 ugv_roarm_description/
 ├── urdf/
 │   ├── ugv_roarm.xacro            # UGV Rover + RoArm URDF
+│   ├── ugv_roarm.gazebo.xacro     # UGV Rover Gazebo 플러그인
 │   ├── rasp_roarm.xacro           # Rasp Rover + RoArm URDF (RPi용)
-│   └── ugv_roarm.gazebo.xacro     # Gazebo 플러그인 포함 URDF
+│   └── rasp_roarm.gazebo.xacro    # Rasp Rover Gazebo 플러그인
 ├── launch/
 │   ├── display.launch.py          # RViz 단독 시각화
 │   ├── gazebo.launch.py           # Gazebo 시뮬레이션
-│   ├── slam.launch.py             # SLAM 맵핑 (Gazebo 시뮬레이션)
-│   ├── slam_real.launch.py        # SLAM 맵핑 (실제 로봇)
-│   ├── rasp_bringup.launch.py     # RPi 하드웨어 통합 실행
+│   ├── slam.launch.py             # SLAM (Gazebo 시뮬레이션)
+│   ├── slam_real.launch.py        # SLAM (실제 로봇)
+│   ├── rasp_bringup.launch.py     # RPi 하드웨어 + rosbridge_server
 │   └── remote_view.launch.py      # WSL RViz + rosbridge 중계
 ├── scripts/
 │   └── teleop_all.py              # 통합 키보드 텔레옵 노드
 ├── config/
 │   ├── ugv_arm_controllers.yaml   # ros2_control 컨트롤러 설정
+│   ├── ugv_arm_ros2_control.xacro # ros2_control 하드웨어 인터페이스
 │   └── slam_toolbox.yaml          # SLAM 파라미터
 ├── rviz/
 │   ├── view_ugv_roarm.rviz        # 기본 RViz 설정
 │   ├── remote_view.rviz           # 원격 제어용 RViz 설정
-│   └── slam_view.rviz             # SLAM용 RViz 설정
-├── meshes/roarm_m2/               # RoArm-M2 메시 파일 (STL)
+│   └── slam_view.rviz             # SLAM용 RViz 설정 (Top-Down)
+├── meshes/
+│   ├── rasp_rover/                # Rasp Rover 메시 (STL)
+│   └── roarm_m2/                  # RoArm-M2 메시 (STL)
 └── worlds/
     └── ugv_roarm.world            # Gazebo 월드
 ```
