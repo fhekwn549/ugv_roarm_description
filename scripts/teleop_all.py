@@ -3,6 +3,8 @@
 """
 Unified keyboard teleop: drive + arm + gripper simultaneous control.
 Supports both Gazebo (ros2_control) and RViz (direct TF) modes.
+Both modes publish cmd_vel, arm trajectory, and gripper commands,
+so the real robot can be controlled from either mode.
 
 Usage:
   ros2 run ugv_roarm_description teleop_all.py                    # Gazebo mode (default)
@@ -32,6 +34,7 @@ from geometry_msgs.msg import Twist, TransformStamped
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from control_msgs.action import GripperCommand
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Float64
 from builtin_interfaces.msg import Duration
 from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster
 
@@ -54,8 +57,13 @@ JOINT_LIMITS = {
     'arm_base_link_to_arm_link1': (-math.pi, math.pi),
     'arm_link1_to_arm_link2':    (-math.pi / 2, math.pi / 2),
     'arm_link2_to_arm_link3':    (-1.0, 2.95),
-    'arm_link3_to_arm_gripper_link': (0.0, 1.5),
 }
+
+# Gripper: grip_level 0=closed, 2π/3=fully open
+# URDF value = -grip_level (axis -1 negates → positive visual rotation in RViz)
+# ESP32 value = grip_level × GRIPPER_ESP32_SCALE
+GRIPPER_GRIP_MAX = 2 * math.pi / 3   # ~120°
+GRIPPER_ESP32_SCALE = 1.5             # maps grip 0-2.094 → ESP32 0-π
 
 # ── Per-model configurations ─────────────────────────────────
 # Arm joints are identical across models
@@ -71,7 +79,7 @@ _ARM_DYNAMIC = [
      'arm_link2_to_arm_link3', (0, 0, 1)),
     ('arm_link3', 'arm_gripper_link',
      (0.002906, -0.21599, -0.00066683), (-1.5708, 0, -1.5708),
-     'arm_link3_to_arm_gripper_link', (0, 0, 1)),
+     'arm_link3_to_arm_gripper_link', (0, 0, -1)),
 ]
 
 MODEL_CONFIGS = {
@@ -315,8 +323,9 @@ class TeleopAll(Node):
         self.joint_positions[GRIPPER_JOINT] = 0.0
         for wj in WHEEL_JOINTS:
             self.joint_positions[wj] = 0.0
+        self.grip_level = 0.0  # 0=closed, GRIPPER_GRIP_MAX=fully open
         self.drive_speed = 0.2
-        self.turn_speed = 0.5
+        self.turn_speed = 2.0
         self.selected_joint = 0
         self.arm_step = 0.05
         self.arm_control_mode = 'joint'  # 'joint' | 'tcp'
@@ -326,6 +335,10 @@ class TeleopAll(Node):
 
         # ── Publishers (both modes) ──────────────────────────
         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 1)
+        self.arm_pub = self.create_publisher(
+            JointTrajectory, '/arm_controller/joint_trajectory', 1)
+        self.gripper_float_pub = self.create_publisher(
+            Float64, '/roarm/gripper_cmd', 1)
 
         if self.mode == 'gazebo':
             self._init_gazebo()
@@ -333,15 +346,12 @@ class TeleopAll(Node):
             self._init_rviz()
 
     def _init_gazebo(self):
-        self.arm_pub = self.create_publisher(
-            JointTrajectory, '/arm_controller/joint_trajectory', 1)
         self.gripper_client = ActionClient(
             self, GripperCommand, '/gripper_controller/gripper_cmd')
         self.create_subscription(
             JointState, '/joint_states', self._joint_state_cb, 10)
 
     def _init_rviz(self):
-        # All TFs published directly — no joint_states needed
         self.tf_broadcaster = TransformBroadcaster(self)
         self.static_tf_broadcaster = StaticTransformBroadcaster(self)
         self.odom_x = 0.0
@@ -360,7 +370,11 @@ class TeleopAll(Node):
     # ── Callbacks ─────────────────────────────────────────────
     def _joint_state_cb(self, msg: JointState):
         for name, pos in zip(msg.name, msg.position):
-            if name in self.joint_positions:
+            if name == GRIPPER_JOINT:
+                # ESP32 feedback (high=closed) → grip_level (high=open)
+                self.grip_level = GRIPPER_GRIP_MAX - pos / GRIPPER_ESP32_SCALE
+                self.joint_positions[name] = -self.grip_level
+            elif name in self.joint_positions:
                 self.joint_positions[name] = pos
 
     # ── Input ─────────────────────────────────────────────────
@@ -386,15 +400,14 @@ class TeleopAll(Node):
         target = clamp(current + direction * self.arm_step, lo, hi)
         self.joint_positions[jname] = target
 
-        if self.mode == 'gazebo':
-            positions = [self.joint_positions[j] for j in ARM_JOINTS]
-            traj = JointTrajectory()
-            traj.joint_names = list(ARM_JOINTS)
-            pt = JointTrajectoryPoint()
-            pt.positions = positions
-            pt.time_from_start = Duration(sec=0, nanosec=200_000_000)
-            traj.points = [pt]
-            self.arm_pub.publish(traj)
+        positions = [self.joint_positions[j] for j in ARM_JOINTS]
+        traj = JointTrajectory()
+        traj.joint_names = list(ARM_JOINTS)
+        pt = JointTrajectoryPoint()
+        pt.positions = positions
+        pt.time_from_start = Duration(sec=0, nanosec=200_000_000)
+        traj.points = [pt]
+        self.arm_pub.publish(traj)
 
     # ── TCP move ──────────────────────────────────────────────
     def move_tcp(self, direction: int):
@@ -423,31 +436,37 @@ class TeleopAll(Node):
             new_joints[jname] = clamp(val, lo, hi)
         for jname, val in new_joints.items():
             self.joint_positions[jname] = val
-        if self.mode == 'gazebo':
-            positions = [self.joint_positions[j] for j in ARM_JOINTS]
-            traj = JointTrajectory()
-            traj.joint_names = list(ARM_JOINTS)
-            pt = JointTrajectoryPoint()
-            pt.positions = positions
-            pt.time_from_start = Duration(sec=0, nanosec=200_000_000)
-            traj.points = [pt]
-            self.arm_pub.publish(traj)
+
+        positions = [self.joint_positions[j] for j in ARM_JOINTS]
+        traj = JointTrajectory()
+        traj.joint_names = list(ARM_JOINTS)
+        pt = JointTrajectoryPoint()
+        pt.positions = positions
+        pt.time_from_start = Duration(sec=0, nanosec=200_000_000)
+        traj.points = [pt]
+        self.arm_pub.publish(traj)
 
     # ── Gripper ───────────────────────────────────────────────
     def move_gripper(self, direction: int):
-        lo, hi = JOINT_LIMITS[GRIPPER_JOINT]
-        current = self.joint_positions[GRIPPER_JOINT]
-        target = clamp(current + direction * self.arm_step, lo, hi)
-        self.joint_positions[GRIPPER_JOINT] = target
+        self.grip_level = clamp(
+            self.grip_level + direction * self.arm_step,
+            0.0, GRIPPER_GRIP_MAX)
 
+        # URDF = -grip_level (axis -1 negates → positive visual rotation)
+        self.joint_positions[GRIPPER_JOINT] = -self.grip_level
+
+        # ESP32 = inverted (ESP32 high=closed, low=open)
+        grip_msg = Float64()
+        grip_msg.data = (GRIPPER_GRIP_MAX - self.grip_level) * GRIPPER_ESP32_SCALE
+        self.gripper_float_pub.publish(grip_msg)
+
+        # Also try Gazebo action server (non-blocking)
         if self.mode == 'gazebo':
-            if not self.gripper_client.wait_for_server(timeout_sec=0.5):
-                self.get_logger().warn('Gripper action server not available')
-                return
-            goal = GripperCommand.Goal()
-            goal.command.position = target
-            goal.command.max_effort = 5.0
-            self.gripper_client.send_goal_async(goal)
+            if self.gripper_client.wait_for_server(timeout_sec=0.1):
+                goal = GripperCommand.Goal()
+                goal.command.position = -self.grip_level
+                goal.command.max_effort = 5.0
+                self.gripper_client.send_goal_async(goal)
 
     # ── RViz: publish ALL TFs in one batch ────────────────────
     def publish_rviz_state(self, linear: float, angular: float):
@@ -494,9 +513,8 @@ class TeleopAll(Node):
 
     # ── Status line ───────────────────────────────────────────
     def print_status(self):
-        gpos = self.joint_positions[GRIPPER_JOINT]
         drive_str = f'Drive: spd={self.drive_speed:.2f} turn={self.turn_speed:.2f}'
-        grip_str = f'Grip: {gpos:.2f}'
+        grip_str = f'Grip: {self.grip_level:.2f}'
         if self.arm_control_mode == 'joint':
             jname = ARM_JOINTS[self.selected_joint]
             jpos = self.joint_positions[jname]
@@ -541,7 +559,7 @@ def main():
                 x, th, count = 0.0, -1.0, 0
             elif key == 'q':
                 node.drive_speed = min(node.drive_speed * 1.1, 1.0)
-                node.turn_speed = min(node.turn_speed * 1.1, 2.0)
+                node.turn_speed = min(node.turn_speed * 1.1, 5.0)
                 node.print_status()
             elif key == 'e':
                 node.drive_speed *= 0.9
