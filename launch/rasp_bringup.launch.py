@@ -73,6 +73,15 @@ def generate_launch_description():
         launch_arguments={'serial_port': '/dev/ttyUSB1'}.items(),
     )
 
+    # 7. rosbridge_server — WSL에서 WebSocket으로 토픽 접근
+    rosbridge_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                get_package_share_directory('rosbridge_server'),
+                'launch', 'rosbridge_websocket_launch.xml')
+        ),
+    )
+
     return LaunchDescription([
         robot_state_publisher_node,
         ugv_bringup_node,
@@ -80,4 +89,5 @@ def generate_launch_description():
         base_node,
         roarm_driver_node,
         ldlidar_launch,
+        rosbridge_launch,
     ])

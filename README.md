@@ -171,6 +171,55 @@ ros2 run ugv_roarm_description teleop_all.py --ros-args -p mode:=rviz
 
 ---
 
+## Quick Start: 실제 로봇 SLAM (WSL + RPi)
+
+> LiDAR로 주변 환경을 스캔하며 2D 맵을 생성합니다. slam_toolbox 사용.
+
+**총 3개의 터미널**이 필요합니다.
+
+#### 터미널 1 — RPi: 하드웨어 드라이버 (SSH)
+
+```bash
+ssh pi@192.168.0.71
+source ~/ugv_ws/install/setup.bash
+
+ros2 launch ugv_roarm_description rasp_bringup.launch.py
+```
+
+#### 터미널 2 — WSL: SLAM + RViz
+
+```bash
+source ~/ugv_ws/install/setup.bash
+
+ros2 launch ugv_roarm_description slam_real.launch.py host:=192.168.0.71
+```
+
+> RViz가 Top-Down 뷰로 열리며 LiDAR 스캔과 점진적으로 생성되는 맵이 표시됩니다.
+
+#### 터미널 3 — WSL: 키보드 텔레옵
+
+```bash
+source ~/ugv_ws/install/setup.bash
+
+# SLAM 시에는 mode:=rviz 없이 실행 (odom TF 충돌 방지)
+ros2 run ugv_roarm_description teleop_all.py --ros-args -p model:=rasp_rover
+```
+
+> 로봇을 천천히 움직이며 맵을 완성합니다. 속도를 낮게 유지하세요 (`e` 키).
+
+#### 맵 저장
+
+맵이 완성되면 새 터미널에서:
+
+```bash
+source ~/ugv_ws/install/setup.bash
+ros2 run nav2_map_server map_saver_cli -f ~/map
+```
+
+> `~/map.pgm`과 `~/map.yaml` 파일이 생성됩니다.
+
+---
+
 ## Quick Start: Gazebo 시뮬레이션
 
 **터미널 1** — Gazebo:
@@ -255,7 +304,8 @@ ugv_roarm_description/
 ├── launch/
 │   ├── display.launch.py          # RViz 단독 시각화
 │   ├── gazebo.launch.py           # Gazebo 시뮬레이션
-│   ├── slam.launch.py             # SLAM 맵핑
+│   ├── slam.launch.py             # SLAM 맵핑 (Gazebo 시뮬레이션)
+│   ├── slam_real.launch.py        # SLAM 맵핑 (실제 로봇)
 │   ├── rasp_bringup.launch.py     # RPi 하드웨어 통합 실행
 │   └── remote_view.launch.py      # WSL RViz + rosbridge 중계
 ├── scripts/
