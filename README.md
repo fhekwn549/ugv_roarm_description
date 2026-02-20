@@ -107,10 +107,10 @@ ros2 launch ugv_roarm_description rasp_bringup.launch.py
 ```bash
 source ~/ugv_ws/install/setup.bash
 
-# RViz + rosbridge_relay 실행 (RPi IP 지정)
-ros2 launch ugv_roarm_description remote_view.launch.py host:=192.168.0.71
+ros2 launch ugv_roarm_description remote_view.launch.py
 ```
 
+> 기본 host는 `192.168.0.71`입니다. RPi IP가 다르면 `host:=<IP>` 추가.
 > RViz가 열리고 RPi의 센서 데이터(LiDAR, IMU, 관절 상태)가 표시됩니다.
 
 #### 터미널 3 — WSL: 키보드 텔레옵
@@ -118,12 +118,12 @@ ros2 launch ugv_roarm_description remote_view.launch.py host:=192.168.0.71
 ```bash
 source ~/ugv_ws/install/setup.bash
 
-# 키보드 텔레옵 (rviz 모드)
-ros2 run ugv_roarm_description teleop_all.py --ros-args -p mode:=rviz -p model:=rasp_rover
+ros2 run ugv_roarm_description teleop_all.py --ros-args -p mode:=rviz
 ```
 
 > 이 터미널에 포커스를 두고 키보드를 누르면 로봇이 움직입니다.
 > `mode:=rviz`는 RViz TF를 직접 publish하면서 동시에 실제 로봇도 제어합니다.
+> 기본 model은 `rasp_rover`입니다. UGV Rover 사용 시 `-p model:=ugv_rover` 추가.
 
 ### 실행 순서 요약
 
@@ -191,7 +191,7 @@ ros2 launch ugv_roarm_description rasp_bringup.launch.py
 ```bash
 source ~/ugv_ws/install/setup.bash
 
-ros2 launch ugv_roarm_description slam_real.launch.py host:=192.168.0.71
+ros2 launch ugv_roarm_description slam_real.launch.py
 ```
 
 > RViz가 Top-Down 뷰로 열리며 LiDAR 스캔과 점진적으로 생성되는 맵이 표시됩니다.
@@ -201,11 +201,12 @@ ros2 launch ugv_roarm_description slam_real.launch.py host:=192.168.0.71
 ```bash
 source ~/ugv_ws/install/setup.bash
 
-# SLAM 시에는 mode:=rviz 없이 실행 (odom TF 충돌 방지)
-ros2 run ugv_roarm_description teleop_all.py --ros-args -p model:=rasp_rover
+# SLAM 시에는 mode:=rviz 없이 기본 모드로 실행 (odom TF 충돌 방지)
+ros2 run ugv_roarm_description teleop_all.py
 ```
 
 > 로봇을 천천히 움직이며 맵을 완성합니다. 속도를 낮게 유지하세요 (`e` 키).
+> SLAM에서는 `mode:=rviz`를 사용하지 않습니다 (relay가 odom TF를 발행).
 
 #### 맵 저장
 
