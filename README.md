@@ -23,9 +23,28 @@ RPi에서는 두 리포 모두 필요합니다. 이 리포의 `rasp_bringup.laun
 
 | 포트 | 장치 | 드라이버 |
 |------|------|---------|
-| `/dev/ttyAMA0` | UGV 바퀴 ESP32 | `ugv_driver` |
+| `/dev/ttyAMA0` | UGV 바퀴 ESP32 (General Driver for Robots) | `ugv_bringup` + `ugv_driver` |
 | `/dev/ttyUSB0` | RoArm-M2 ESP32 | `roarm_driver` |
 | `/dev/ttyUSB1` | LDLidar STL-19P | `ldlidar_ros2` |
+
+### ESP32 시리얼 프로토콜 (바퀴 ESP32)
+
+- 포트: `/dev/ttyAMA0`, 115200 baud
+- 피드백은 기본 비활성 → `ugv_bringup`이 시작 시 `{"T":131,"cmd":1}` 전송하여 활성화
+- 활성화 후 ESP32가 ~85Hz로 T:1001 피드백 전송:
+  ```json
+  {"T":1001,"L":0,"R":0,"r":-0.19,"p":1.45,"y":-165.79,"temp":75.0,"v":11.53}
+  ```
+  - `L/R`: 좌/우 인코더 값
+  - `r/p/y`: roll/pitch/yaw (degrees) — IMU 센서 (QMI8658 + AK09918)
+  - `v`: 배터리 전압 (V)
+
+### 전원 구성
+
+- UPS 모듈: 3S 18650 (9~12.6V)
+- Rover 보드: UPS BAT 포트에서 배터리 전압 직통
+- RoArm-M2 보드: UPS BAT 포트에서 Y케이블 분기 (12V급 필요, 5V 포트 사용 불가)
+- ST3215 서보 동작 전압: 6~12.6V
 
 ### Step 1: RPi 세팅 (SSH 터미널)
 
@@ -210,14 +229,14 @@ ros2 run ugv_roarm_description teleop_all.py
 
 #### 맵 저장
 
-맵이 완성되면 새 터미널에서:
+`Ctrl+C`로 SLAM을 종료하면 `~/maps/map_YYYYMMDD_HHMMSS.pgm/.yaml`에 자동 저장됩니다.
+
+수동으로 저장하려면 새 터미널에서:
 
 ```bash
 source ~/ugv_ws/install/setup.bash
 ros2 run nav2_map_server map_saver_cli -f ~/map
 ```
-
-> `~/map.pgm`과 `~/map.yaml` 파일이 생성됩니다.
 
 ---
 
@@ -338,6 +357,9 @@ ugv_roarm_description/
 | `/joint_states` | `sensor_msgs/JointState` | 관절 상태 피드백 |
 | `/scan` | `sensor_msgs/LaserScan` | 2D LiDAR |
 | `/odom` | `nav_msgs/Odometry` | 오도메트리 |
+| `/odom/odom_raw` | `std_msgs/Float32MultiArray` | 인코더 원시값 [L, R] |
+| `/imu/data` | `sensor_msgs/Imu` | IMU 방위 (쿼터니언) |
+| `/voltage` | `std_msgs/Float32` | 배터리 전압 (V) |
 
 ## 배포 (코드 수정 후)
 
@@ -358,6 +380,14 @@ colcon build --packages-select ugv_bringup ugv_roarm_description
 source install/setup.bash
 ```
 
+## ugv_driver 파라미터
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| `angular_scale` | `2.5` | 회전 속도 배율. 스키드 스티어는 지면 마찰 때문에 높은 토크가 필요합니다 |
+
+> `ugv_driver`는 `cmd_vel`의 `linear.x`를 부호 반전하여 ESP32에 전달합니다 (ESP32 모터 방향이 URDF 규약과 반대).
+
 ## Troubleshooting
 
 | 증상 | 원인 | 해결 |
@@ -365,6 +395,9 @@ source install/setup.bash
 | RViz에서 로봇이 안 보임 | `ugv_description` 미빌드 | `colcon build --packages-select ugv_description` 후 source |
 | rosbridge 연결 안 됨 | RPi의 rosbridge_server 미실행 | RPi에서 `rasp_bringup.launch.py` 먼저 실행 |
 | 로봇이 RViz에서 안 움직임 | teleop 미실행 또는 Fixed Frame 설정 | teleop 실행 + Fixed Frame을 `odom`으로 설정 |
+| SLAM에서 RViz 로봇이 안 움직임 | odom/IMU 미수신 | `/odom`, `/imu/data` 토픽 확인. ESP32 피드백 활성화 필요 (T:131) |
+| 로봇팔 토크 걸리지만 안 움직임 | 전압 부족 (5V) | UPS BAT 포트에서 12V 공급. 5V 포트 사용 불가 |
 | 팔 관절 움직이면 그리퍼 토크 풀림 | `roarm_driver` 미업데이트 | RPi에서 `ugv_bringup` 리빌드 |
+| 바닥에서 제자리 회전 안 됨 | 스키드 스티어 마찰 | `angular_scale` 파라미터 증가 (기본 2.5) |
 | WSL2에서 RViz 크래시 | GPU 호환성 | `LIBGL_ALWAYS_SOFTWARE=1` 환경변수 설정 |
 | 그리퍼 방향 반대 | roarm_driver 버전 불일치 | RPi에서 git pull + 리빌드 |
