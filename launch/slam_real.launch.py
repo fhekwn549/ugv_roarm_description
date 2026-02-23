@@ -7,14 +7,17 @@ WSL에서 이 launch 파일을 실행하면 rosbridge relay + slam_toolbox + RVi
 rosbridge_relay가 /odom 데이터에서 odom→base_footprint TF를 발행하므로
 teleop은 mode=rviz 없이 실행해야 합니다 (TF 충돌 방지).
 
+Ctrl+C 종료 시 ~/maps/map_YYYYMMDD_HHMMSS.pgm/.yaml 자동 저장.
+
 Usage:
   ros2 launch ugv_roarm_description slam_real.launch.py
   ros2 launch ugv_roarm_description slam_real.launch.py host:=192.168.0.71
 """
 
 import os
+from datetime import datetime
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.substitutions import LaunchConfiguration, Command
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -27,6 +30,12 @@ def generate_launch_description():
     urdf_file = os.path.join(pkg_dir, 'urdf', 'rasp_roarm.xacro')
     slam_params = os.path.join(pkg_dir, 'config', 'slam_toolbox.yaml')
     rviz_config = os.path.join(pkg_dir, 'rviz', 'slam_view.rviz')
+
+    # Auto-save map on shutdown
+    map_dir = os.path.expanduser('~/maps')
+    os.makedirs(map_dir, exist_ok=True)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    map_path = os.path.join(map_dir, f'map_{timestamp}')
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -97,5 +106,18 @@ def generate_launch_description():
             output='screen',
             arguments=['-d', rviz_config],
             additional_env={'LIBGL_ALWAYS_SOFTWARE': '1'}
+        ),
+
+        # Map auto-saver: traps SIGINT and saves map before other nodes exit
+        ExecuteProcess(
+            cmd=['bash', '-c',
+                 f'trap "'
+                 f'echo [map_saver] Saving map to {map_path}... ; '
+                 f'ros2 run nav2_map_server map_saver_cli -f {map_path} 2>/dev/null ; '
+                 f'echo [map_saver] Done. ; '
+                 f'exit 0'
+                 f'" INT TERM; '
+                 f'while true; do sleep 1; done'],
+            output='screen',
         ),
     ])
