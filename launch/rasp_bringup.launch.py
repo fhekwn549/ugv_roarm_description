@@ -50,7 +50,7 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'pub_odom_tf': True,
-            'wheel_separation': 0.076,
+            'use_cmd_vel_odom': True,
         }]
     )
 
