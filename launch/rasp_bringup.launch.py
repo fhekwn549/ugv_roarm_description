@@ -1,7 +1,5 @@
 import os
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
-from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -66,16 +64,31 @@ def generate_launch_description():
     )
 
     # 6. LDLidar (STL-19P / LD19) — /scan laser data
-    ldlidar_pkg_dir = get_package_share_directory('ldlidar_ros2')
-    ldlidar_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(ldlidar_pkg_dir, 'launch', 'ld19.launch.py')
-        ),
-        launch_arguments={'serial_port': '/dev/ttyUSB1'}.items(),
+    # Node launched directly (not via ld19.launch.py) to avoid its
+    # conflicting base_link→base_laser static TF
+    ldlidar_node = Node(
+        package='ldlidar_ros2',
+        executable='ldlidar_ros2_node',
+        name='ldlidar_publisher_ld19',
+        output='screen',
+        parameters=[{
+            'product_name': 'LDLiDAR_LD19',
+            'laser_scan_topic_name': 'scan',
+            'point_cloud_2d_topic_name': 'pointcloud2d',
+            'frame_id': 'base_laser',
+            'port_name': '/dev/ttyUSB1',
+            'serial_baudrate': 230400,
+            'laser_scan_dir': True,
+            'enable_angle_crop_func': False,
+            'angle_crop_min': 135.0,
+            'angle_crop_max': 225.0,
+            'range_min': 0.02,
+            'range_max': 12.0,
+        }],
     )
 
     # 7. Static TF: base_lidar_link → base_laser
-    # RPi ldlidar uses frame_id 'base_laser', URDF has 'base_lidar_link'
+    # LiDAR publishes with frame_id 'base_laser', URDF has 'base_lidar_link'
     # yaw=π/2: LiDAR physical mounting is 90° rotated from URDF assumption
     lidar_static_tf = Node(
         package='tf2_ros',
@@ -91,6 +104,6 @@ def generate_launch_description():
         ugv_driver_node,
         base_node,
         roarm_driver_node,
-        ldlidar_launch,
+        ldlidar_node,
         lidar_static_tf,
     ])
