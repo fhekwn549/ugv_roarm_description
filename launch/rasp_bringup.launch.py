@@ -50,6 +50,7 @@ def generate_launch_description():
             'pub_odom_tf': True,
             'use_cmd_vel_odom': True,
             'use_imu_yaw': False,
+            'yaw_scale': 0.5,
         }]
     )
 
