@@ -240,6 +240,69 @@ ros2 run nav2_map_server map_saver_cli -f ~/map
 
 ---
 
+## Quick Start: 자율주행 Navigation (WSL + RPi)
+
+> SLAM으로 생성한 맵 파일이 필요합니다. 먼저 위의 SLAM 섹션으로 맵을 만드세요.
+
+### 사전 조건
+
+```bash
+# WSL에 Nav2 패키지 설치
+sudo apt install ros-humble-navigation2 ros-humble-nav2-bringup
+```
+
+**총 3개의 터미널**이 필요합니다.
+
+#### 터미널 1 — RPi: 하드웨어 드라이버 (SSH)
+
+```bash
+ssh pi@192.168.0.71
+source ~/ugv_ws/install/setup.bash
+
+ros2 launch ugv_roarm_description rasp_bringup.launch.py
+```
+
+#### 터미널 2 — WSL: Nav2 + RViz
+
+```bash
+source ~/ugv_ws/install/setup.bash
+
+# map 인자에 SLAM으로 저장한 맵 YAML 경로를 지정
+ros2 launch ugv_roarm_description nav_real.launch.py map:=~/maps/map_20250101_120000.yaml
+```
+
+> Nav2 lifecycle 노드들이 순서대로 활성화됩니다 (map_server → amcl → planner → controller → ...).
+> 모든 노드가 `active` 상태가 되면 자율주행 준비 완료입니다.
+
+#### 터미널 3 — WSL: 키보드 텔레옵 (선택사항)
+
+```bash
+source ~/ugv_ws/install/setup.bash
+
+# Nav2에서는 mode:=rviz 없이 기본 모드로 실행 (odom TF 충돌 방지)
+ros2 run ugv_roarm_description teleop_all.py
+```
+
+> 자율주행 중 수동 개입이 필요할 때 사용합니다. Nav2가 cmd_vel을 제어하므로 동시 사용 시 충돌에 주의하세요.
+
+### RViz에서 자율주행 사용법
+
+1. **초기 위치 설정**: RViz 상단 도구에서 `2D Pose Estimate` 클릭 → 맵 위에서 로봇의 실제 위치와 방향을 드래그하여 설정
+2. **AMCL 수렴 확인**: 파란 파티클 클라우드가 로봇 주변에 모일 때까지 대기 (또는 텔레옵으로 약간 회전)
+3. **목표점 설정**: `Nav2 Goal` 클릭 → 맵 위에서 목표 위치와 방향을 드래그하여 설정
+4. 로봇이 전역 경로(초록선)를 따라 자율주행합니다
+
+### 실행 순서 요약
+
+```
+[RPi SSH]  rasp_bringup.launch.py                  ← 먼저 실행 (하드웨어 준비)
+    ↓ rosbridge (ws://192.168.0.71:9090)
+[WSL 1]    nav_real.launch.py map:=~/maps/map.yaml  ← RPi 연결 후 실행 (Nav2 + RViz)
+[WSL 2]    teleop_all.py                            ← 선택사항 (수동 개입용)
+```
+
+---
+
 ## Quick Start: Gazebo 시뮬레이션
 
 **터미널 1** — Gazebo:
@@ -327,6 +390,7 @@ ugv_roarm_description/
 │   ├── gazebo.launch.py           # Gazebo 시뮬레이션
 │   ├── slam.launch.py             # SLAM (Gazebo 시뮬레이션)
 │   ├── slam_real.launch.py        # SLAM (실제 로봇)
+│   ├── nav_real.launch.py         # Nav2 자율주행 (실제 로봇)
 │   ├── rasp_bringup.launch.py     # RPi 하드웨어 + rosbridge_server
 │   └── remote_view.launch.py      # WSL RViz + rosbridge 중계
 ├── scripts/
@@ -334,11 +398,13 @@ ugv_roarm_description/
 ├── config/
 │   ├── ugv_arm_controllers.yaml   # ros2_control 컨트롤러 설정
 │   ├── ugv_arm_ros2_control.xacro # ros2_control 하드웨어 인터페이스
-│   └── slam_toolbox.yaml          # SLAM 파라미터
+│   ├── slam_toolbox.yaml          # SLAM 파라미터
+│   └── nav2_params.yaml           # Nav2 자율주행 파라미터
 ├── rviz/
 │   ├── view_ugv_roarm.rviz        # 기본 RViz 설정
 │   ├── remote_view.rviz           # 원격 제어용 RViz 설정
-│   └── slam_view.rviz             # SLAM용 RViz 설정 (Top-Down)
+│   ├── slam_view.rviz             # SLAM용 RViz 설정 (Top-Down)
+│   └── nav_view.rviz              # Nav2 자율주행용 RViz 설정
 ├── meshes/
 │   ├── rasp_rover/                # Rasp Rover 메시 (STL)
 │   └── roarm_m2/                  # RoArm-M2 메시 (STL)
@@ -385,6 +451,7 @@ source install/setup.bash
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
 | `angular_scale` | `2.5` | 회전 속도 배율. 스키드 스티어는 지면 마찰 때문에 높은 토크가 필요합니다 |
+| `steering_bias` | `0.0` | 좌/우 바퀴 저항 차이 보정. 주행 속도에 비례하여 각속도 오프셋 적용 (`angular += bias * linear`). 직진 시 한쪽으로 치우치면 부호/크기 조정 |
 
 > `ugv_driver`는 `cmd_vel`의 `linear.x`를 부호 반전하여 ESP32에 전달합니다 (ESP32 모터 방향이 URDF 규약과 반대).
 
