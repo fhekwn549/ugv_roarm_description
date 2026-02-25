@@ -39,6 +39,7 @@ def generate_launch_description():
         executable='ugv_driver',
         name='ugv_driver',
         output='screen',
+        parameters=[{'steering_bias': 0.1}],
     )
 
     # 4. Base Node — odometry calculation + odom -> base_footprint TF
