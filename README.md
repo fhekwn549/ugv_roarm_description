@@ -442,11 +442,13 @@ cd ~/ugv_ws
 git pull origin ros2-humble-develop
 cd src/ugv_main/ugv_roarm_description && git pull origin main
 cd ~/ugv_ws
-colcon build --packages-select ugv_bringup ugv_roarm_description
+colcon build --packages-select ugv_bringup ugv_base_node ugv_roarm_description
 source install/setup.bash
 ```
 
-## ugv_driver 파라미터
+## 파라미터
+
+### ugv_driver
 
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
@@ -455,6 +457,26 @@ source install/setup.bash
 
 > `ugv_driver`는 `cmd_vel`의 `linear.x`를 부호 반전하여 ESP32에 전달합니다 (ESP32 모터 방향이 URDF 규약과 반대).
 
+### base_node
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| `pub_odom_tf` | `false` | odom → base_footprint TF 발행 여부 |
+| `use_cmd_vel_odom` | `false` | `true`: cmd_vel + IMU yaw dead reckoning으로 오도메트리 추정 (인코더 없는 로봇용). `false`: 인코더 기반 오도메트리 |
+| `wheel_separation` | `0.175` | 좌우 바퀴 간 거리 (m). 인코더 모드에서만 사용 |
+
+> Wave Rover는 인코더가 없으므로 `rasp_bringup.launch.py`에서 `use_cmd_vel_odom: true`로 설정되어 있습니다.
+
+### roarm_driver
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| `serial_port` | `/dev/ttyUSB0` | RoArm-M2 ESP32 시리얼 포트 |
+| `baud_rate` | `115200` | 시리얼 통신 속도 |
+| `feedback_rate` | `5.0` | T:105 관절 피드백 주기 (Hz) |
+
+> 드라이버 시작 시 토크 ON 후 홈 포즈 (base=0, shoulder=-1.6, elbow=3.2, hand=3)로 이동합니다. 팔을 접은 자세로 그리퍼가 닫힌 상태입니다.
+
 ## Troubleshooting
 
 | 증상 | 원인 | 해결 |
@@ -462,9 +484,12 @@ source install/setup.bash
 | RViz에서 로봇이 안 보임 | `ugv_description` 미빌드 | `colcon build --packages-select ugv_description` 후 source |
 | rosbridge 연결 안 됨 | RPi의 rosbridge_server 미실행 | RPi에서 `rasp_bringup.launch.py` 먼저 실행 |
 | 로봇이 RViz에서 안 움직임 | teleop 미실행 또는 Fixed Frame 설정 | teleop 실행 + Fixed Frame을 `odom`으로 설정 |
-| SLAM에서 RViz 로봇이 안 움직임 | odom/IMU 미수신 | `/odom`, `/imu/data` 토픽 확인. ESP32 피드백 활성화 필요 (T:131) |
+| SLAM에서 odom 위치가 안 변함 | `use_cmd_vel_odom` 미설정 | base_node에 `use_cmd_vel_odom: true` 파라미터 추가 (인코더 없는 로봇) |
+| SLAM에서 로봇이 반대로 움직임 | dead reckoning 부호 불일치 | `base_node.cpp`의 `cmd_linear_x_` 부호 확인 |
 | 로봇팔 토크 걸리지만 안 움직임 | 전압 부족 (5V) | UPS BAT 포트에서 12V 공급. 5V 포트 사용 불가 |
 | 팔 관절 움직이면 그리퍼 토크 풀림 | `roarm_driver` 미업데이트 | RPi에서 `ugv_bringup` 리빌드 |
+| roarm_driver SerialException | 시리얼 포트 다중 접근 | 수동 테스트 스크립트 종료 후 launch 재시작 |
 | 바닥에서 제자리 회전 안 됨 | 스키드 스티어 마찰 | `angular_scale` 파라미터 증가 (기본 2.5) |
+| 직진 시 한쪽으로 치우침 | 좌/우 바퀴 저항 차이 | `steering_bias` 파라미터 조정 (rasp_bringup 기본값 0.1) |
 | WSL2에서 RViz 크래시 | GPU 호환성 | `LIBGL_ALWAYS_SOFTWARE=1` 환경변수 설정 |
 | 그리퍼 방향 반대 | roarm_driver 버전 불일치 | RPi에서 git pull + 리빌드 |
