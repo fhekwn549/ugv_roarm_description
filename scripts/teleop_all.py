@@ -12,7 +12,7 @@ Usage:
 
 Key mappings (all active at the same time):
   [Drive]       w/s = forward/back, a/d = turn left/right
-                q/e = increase/decrease drive speed
+                q/e = linear speed +/-, z/x = angular speed +/-
                 Space = emergency stop
   [Arm]         1/2/3 = select joint 1~3
                 i/k = selected joint +/- (incremental)
@@ -161,7 +161,8 @@ BANNER_JOINT = """
 =========================================
   [Drive]  w/s : forward / back
            a/d : turn left / right
-           q/e : speed  +/-
+           q/e : linear speed  +/-
+           z/x : angular speed +/-
          Space : emergency stop
 
   [Arm]  1/2/3 : select joint 1~3
@@ -182,7 +183,8 @@ BANNER_TCP = """
 =========================================
   [Drive]  w/s : forward / back
            a/d : turn left / right
-           q/e : speed  +/-
+           q/e : linear speed  +/-
+           z/x : angular speed +/-
          Space : emergency stop
 
   [Arm]  1/2/3 : select axis X/Y/Z
@@ -559,11 +561,15 @@ def main():
                 x, th, count = 0.0, -1.0, 0
             elif key == 'q':
                 node.drive_speed = min(node.drive_speed * 1.1, 1.0)
-                node.turn_speed = min(node.turn_speed * 1.1, 5.0)
                 node.print_status()
             elif key == 'e':
-                node.drive_speed *= 0.9
-                node.turn_speed *= 0.9
+                node.drive_speed = max(node.drive_speed * 0.9, 0.01)
+                node.print_status()
+            elif key == 'z':
+                node.turn_speed = min(node.turn_speed * 1.1, 5.0)
+                node.print_status()
+            elif key == 'x':
+                node.turn_speed = max(node.turn_speed * 0.9, 0.1)
                 node.print_status()
             elif key == ' ':
                 x, th, count = 0.0, 0.0, 0
