@@ -1,7 +1,7 @@
 import os
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
-from launch.launch_description_sources import AnyLaunchDescriptionSource, PythonLaunchDescriptionSource
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -74,13 +74,15 @@ def generate_launch_description():
         launch_arguments={'serial_port': '/dev/ttyUSB1'}.items(),
     )
 
-    # 7. rosbridge_server — WSL에서 WebSocket으로 토픽 접근
-    rosbridge_launch = IncludeLaunchDescription(
-        AnyLaunchDescriptionSource(
-            os.path.join(
-                get_package_share_directory('rosbridge_server'),
-                'launch', 'rosbridge_websocket_launch.xml')
-        ),
+    # 7. Static TF: base_lidar_link → base_laser
+    # RPi ldlidar uses frame_id 'base_laser', URDF has 'base_lidar_link'
+    # yaw=π/2: LiDAR physical mounting is 90° rotated from URDF assumption
+    lidar_static_tf = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='base_lidar_to_base_laser',
+        arguments=['0', '0', '0', '1.5708', '0', '0',
+                   'base_lidar_link', 'base_laser']
     )
 
     return LaunchDescription([
@@ -90,5 +92,5 @@ def generate_launch_description():
         base_node,
         roarm_driver_node,
         ldlidar_launch,
-        rosbridge_launch,
+        lidar_static_tf,
     ])

@@ -9,9 +9,55 @@ Waveshare UGV Rover (4WD skid-steer) 위에 RoArm-M2 (4-DOF + gripper) 로봇팔
 | 리포 | 역할 | 내용 |
 |------|------|------|
 | **이 리포 (`ugv_roarm_description`)** | 로봇 정의 + 실행 구성 | URDF, launch, Gazebo 시뮬레이션, 텔레옵 |
-| [fhekwn549/ugv_ws](https://github.com/fhekwn549/ugv_ws) | 하드웨어 구동 | 시리얼 드라이버, 센서 처리, 오도메트리, rosbridge 중계 |
+| [fhekwn549/ugv_ws](https://github.com/fhekwn549/ugv_ws) | 하드웨어 구동 | 시리얼 드라이버, 센서 처리, 오도메트리 |
 
 RPi에서는 두 리포 모두 필요합니다. 이 리포의 `rasp_bringup.launch.py`가 `ugv_ws`의 드라이버 노드들을 실행합니다.
+
+---
+
+## 통신 아키텍처 (CycloneDDS)
+
+WSL2와 RPi는 **CycloneDDS**를 통해 직접 DDS 통신합니다. rosbridge/WebSocket 브릿지 없이 네이티브 ROS 2 토픽이 양방향으로 전달됩니다.
+
+```
+RPi (rasp_bringup.launch.py)                WSL (slam_real / nav_real / remote_view)
+├── robot_state_publisher ──DDS──→          ├── slam_toolbox / Nav2
+├── ugv_driver                               ├── RViz2
+├── base_node (odom + TF)     ←DDS──        └── teleop_all.py
+├── roarm_driver                  │
+├── ldlidar_ros2                  │
+└── static TF (base_lidar→laser)  └── /cmd_vel, /arm_controller/...
+```
+
+### CycloneDDS 설정
+
+RPi와 WSL 양쪽에 동일한 설정 파일이 필요합니다.
+
+**`~/cyclonedds.xml`:**
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<CycloneDDS xmlns="https://cdds.io/config">
+  <Domain>
+    <General>
+      <Interfaces>
+        <NetworkInterface name="eth0" />  <!-- RPi: eth0, WSL: eth0 -->
+      </Interfaces>
+    </General>
+    <Discovery>
+      <Peers>
+        <Peer address="192.168.0.71" />   <!-- RPi IP -->
+        <Peer address="192.168.0.XXX" />  <!-- WSL IP -->
+      </Peers>
+    </Discovery>
+  </Domain>
+</CycloneDDS>
+```
+
+**환경변수 (`.bashrc`):**
+```bash
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export CYCLONEDDS_URI=file://$HOME/cyclonedds.xml
+```
 
 ---
 
@@ -62,17 +108,20 @@ git clone https://github.com/fhekwn549/ugv_roarm_description.git
 pip3 install pyserial
 
 # 3. apt 패키지 설치
-sudo apt install ros-humble-rosbridge-server ros-humble-xacro \
+sudo apt install ros-humble-rmw-cyclonedds-cpp ros-humble-xacro \
   ros-humble-robot-state-publisher ros-humble-joint-state-publisher
 
-# 4. 빌드 (필요한 패키지만)
+# 4. CycloneDDS 설정 (위의 "CycloneDDS 설정" 섹션 참고)
+# ~/cyclonedds.xml 생성 + .bashrc에 환경변수 추가
+
+# 5. 빌드 (필요한 패키지만)
 cd ~/ugv_ws
 source /opt/ros/humble/setup.bash
 colcon build --packages-select ugv_bringup ugv_roarm_description ugv_description \
   ugv_base_node ugv_interface ldlidar
 source install/setup.bash
 
-# 5. bashrc에 자동 source 추가 (최초 1회)
+# 6. bashrc에 자동 source 추가 (최초 1회)
 echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
 echo "source ~/ugv_ws/install/setup.bash" >> ~/.bashrc
 ```
@@ -86,13 +135,13 @@ git clone -b ros2-humble-develop https://github.com/fhekwn549/ugv_ws.git
 cd ~/ugv_ws/src/ugv_main
 git clone https://github.com/fhekwn549/ugv_roarm_description.git
 
-# 2. Python 의존성 설치
-pip3 install roslibpy
+# 2. apt 패키지 설치
+sudo apt install ros-humble-rmw-cyclonedds-cpp ros-humble-xacro \
+  ros-humble-robot-state-publisher ros-humble-joint-state-publisher \
+  ros-humble-joint-state-publisher-gui ros-humble-rviz2 ros-humble-tf2-ros
 
-# 3. apt 패키지 설치
-sudo apt install ros-humble-xacro ros-humble-robot-state-publisher \
-  ros-humble-joint-state-publisher ros-humble-joint-state-publisher-gui \
-  ros-humble-rviz2 ros-humble-tf2-ros
+# 3. CycloneDDS 설정 (위의 "CycloneDDS 설정" 섹션 참고)
+# ~/cyclonedds.xml 생성 + .bashrc에 환경변수 추가
 
 # 4. 빌드
 cd ~/ugv_ws
@@ -109,27 +158,25 @@ echo "source ~/ugv_ws/install/setup.bash" >> ~/.bashrc
 
 **총 3개의 터미널**이 필요합니다.
 
-#### 터미널 1 — RPi: 하드웨어 드라이버 + rosbridge (SSH)
+#### 터미널 1 — RPi: 하드웨어 드라이버 (SSH)
 
 ```bash
 ssh pi@192.168.0.71
 source ~/ugv_ws/install/setup.bash
 
-# 모든 하드웨어 드라이버 + rosbridge_server 실행
+# 모든 하드웨어 드라이버 실행
 ros2 launch ugv_roarm_description rasp_bringup.launch.py
 ```
 
-> rosbridge_server가 포트 9090에서 대기합니다. WSL에서 접속할 준비 완료.
-
-#### 터미널 2 — WSL: RViz + rosbridge 중계
+#### 터미널 2 — WSL: RViz
 
 ```bash
 source ~/ugv_ws/install/setup.bash
 
+# DDS를 통해 RPi 토픽 자동 수신 — host 파라미터 불필요
 ros2 launch ugv_roarm_description remote_view.launch.py
 ```
 
-> 기본 host는 `192.168.0.71`입니다. RPi IP가 다르면 `host:=<IP>` 추가.
 > RViz가 열리고 RPi의 센서 데이터(LiDAR, IMU, 관절 상태)가 표시됩니다.
 
 #### 터미널 3 — WSL: 키보드 텔레옵
@@ -148,8 +195,8 @@ ros2 run ugv_roarm_description teleop_all.py --ros-args -p mode:=rviz
 
 ```
 [RPi SSH]  rasp_bringup.launch.py        ← 먼저 실행 (하드웨어 준비)
-    ↓ rosbridge (ws://192.168.0.71:9090)
-[WSL 1]    remote_view.launch.py          ← RPi 연결 후 실행 (RViz 시각화)
+    ↓ CycloneDDS (자동 discovery)
+[WSL 1]    remote_view.launch.py          ← RViz 시각화
 [WSL 2]    teleop_all.py mode:=rviz       ← 마지막 실행 (키보드 조작)
 ```
 
@@ -157,7 +204,7 @@ ros2 run ugv_roarm_description teleop_all.py --ros-args -p mode:=rviz
 
 ```
 [WSL 2]    Ctrl+C (텔레옵 종료)
-[WSL 1]    Ctrl+C (RViz + 중계 종료)
+[WSL 1]    Ctrl+C (RViz 종료)
 [RPi SSH]  Ctrl+C (하드웨어 드라이버 종료)
 ```
 
@@ -220,12 +267,10 @@ ros2 launch ugv_roarm_description slam_real.launch.py
 ```bash
 source ~/ugv_ws/install/setup.bash
 
-# SLAM 시에는 mode:=rviz 없이 기본 모드로 실행 (odom TF 충돌 방지)
 ros2 run ugv_roarm_description teleop_all.py
 ```
 
 > 로봇을 천천히 움직이며 맵을 완성합니다. 속도를 낮게 유지하세요 (`e` 키).
-> SLAM에서는 `mode:=rviz`를 사용하지 않습니다 (relay가 odom TF를 발행).
 
 #### 맵 저장
 
@@ -279,7 +324,6 @@ ros2 launch ugv_roarm_description nav_real.launch.py map:=~/maps/map_20250101_12
 ```bash
 source ~/ugv_ws/install/setup.bash
 
-# Nav2에서는 mode:=rviz 없이 기본 모드로 실행 (odom TF 충돌 방지)
 ros2 run ugv_roarm_description teleop_all.py
 ```
 
@@ -296,8 +340,8 @@ ros2 run ugv_roarm_description teleop_all.py
 
 ```
 [RPi SSH]  rasp_bringup.launch.py                  ← 먼저 실행 (하드웨어 준비)
-    ↓ rosbridge (ws://192.168.0.71:9090)
-[WSL 1]    nav_real.launch.py map:=~/maps/map.yaml  ← RPi 연결 후 실행 (Nav2 + RViz)
+    ↓ CycloneDDS (자동 discovery)
+[WSL 1]    nav_real.launch.py map:=~/maps/map.yaml  ← Nav2 + RViz
 [WSL 2]    teleop_all.py                            ← 선택사항 (수동 개입용)
 ```
 
@@ -356,11 +400,11 @@ ros2 run ugv_roarm_description teleop_all.py
 [WSL]                                          [RPi]
 teleop_all.py                                  rasp_bringup.launch.py
   ├─ /cmd_vel ──────┐                            ├─ ugv_driver (/dev/ttyAMA0)
-  ├─ /arm_controller │    rosbridge_relay         ├─ roarm_driver (/dev/ttyUSB0)
-  │   /joint_trajectory┤  ←── WebSocket ──→       ├─ base_node (odom)
-  ├─ /roarm/gripper_cmd┘   (ws://RPi:9090)        ├─ ugv_bringup (IMU, encoder)
-  │                                                └─ ldlidar_ros2 (/dev/ttyUSB1)
-  │  ← /joint_states, /scan, /odom, /imu ←
+  ├─ /arm_controller │     CycloneDDS             ├─ roarm_driver (/dev/ttyUSB0)
+  │   /joint_trajectory┤  ←── DDS direct ──→       ├─ base_node (odom)
+  ├─ /roarm/gripper_cmd┘                           ├─ ugv_bringup (IMU, encoder)
+  │                                                 ├─ ldlidar_ros2 (/dev/ttyUSB1)
+  │  ← /joint_states, /scan, /odom, /imu ←         └─ static TF (lidar→laser)
   │
   └─ RViz (TF 시각화)
 ```
@@ -391,8 +435,8 @@ ugv_roarm_description/
 │   ├── slam.launch.py             # SLAM (Gazebo 시뮬레이션)
 │   ├── slam_real.launch.py        # SLAM (실제 로봇)
 │   ├── nav_real.launch.py         # Nav2 자율주행 (실제 로봇)
-│   ├── rasp_bringup.launch.py     # RPi 하드웨어 + rosbridge_server
-│   └── remote_view.launch.py      # WSL RViz + rosbridge 중계
+│   ├── rasp_bringup.launch.py     # RPi 하드웨어 드라이버
+│   └── remote_view.launch.py      # WSL RViz 뷰어
 ├── scripts/
 │   └── teleop_all.py              # 통합 키보드 텔레옵 노드
 ├── config/
@@ -482,7 +526,8 @@ source install/setup.bash
 | 증상 | 원인 | 해결 |
 |------|------|------|
 | RViz에서 로봇이 안 보임 | `ugv_description` 미빌드 | `colcon build --packages-select ugv_description` 후 source |
-| rosbridge 연결 안 됨 | RPi의 rosbridge_server 미실행 | RPi에서 `rasp_bringup.launch.py` 먼저 실행 |
+| WSL에서 RPi 토픽 안 보임 | CycloneDDS 미설정 | `~/cyclonedds.xml` 확인 + `RMW_IMPLEMENTATION`, `CYCLONEDDS_URI` 환경변수 확인 |
+| `ros2 topic list`에 RPi 토픽 없음 | 네트워크/방화벽 문제 | `ping 192.168.0.71` 확인, WSL 방화벽 규칙 확인 |
 | 로봇이 RViz에서 안 움직임 | teleop 미실행 또는 Fixed Frame 설정 | teleop 실행 + Fixed Frame을 `odom`으로 설정 |
 | SLAM에서 odom 위치가 안 변함 | `use_cmd_vel_odom` 미설정 | base_node에 `use_cmd_vel_odom: true` 파라미터 추가 (인코더 없는 로봇) |
 | SLAM에서 로봇이 반대로 움직임 | dead reckoning 부호 불일치 | `base_node.cpp`의 `cmd_linear_x_` 부호 확인 |
