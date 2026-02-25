@@ -49,6 +49,7 @@ def generate_launch_description():
         parameters=[{
             'pub_odom_tf': True,
             'use_cmd_vel_odom': True,
+            'use_imu_yaw': False,
         }]
     )
 
