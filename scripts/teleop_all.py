@@ -326,7 +326,7 @@ class TeleopAll(Node):
         for wj in WHEEL_JOINTS:
             self.joint_positions[wj] = 0.0
         self.grip_level = 0.0  # 0=closed, GRIPPER_GRIP_MAX=fully open
-        self.drive_speed = 0.2
+        self.drive_speed = 0.3
         self.turn_speed = 2.0
         self.selected_joint = 0
         self.arm_step = 0.05
