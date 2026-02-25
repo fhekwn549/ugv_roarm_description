@@ -21,9 +21,9 @@ WSL2와 RPi는 **CycloneDDS**를 통해 직접 DDS 통신합니다. rosbridge/We
 
 ```
 RPi (rasp_bringup.launch.py)                WSL (slam_real / nav_real / remote_view)
-├── robot_state_publisher ──DDS──→          ├── slam_toolbox / Nav2
+├── robot_state_publisher ──DDS──→          ├── Cartographer / Nav2
 ├── ugv_driver                               ├── RViz2
-├── base_node (odom + TF)     ←DDS──        └── teleop_all.py
+├── rf2o_laser_odometry (odom + TF) ←DDS──  └── teleop_all.py
 ├── roarm_driver                  │
 ├── ldlidar_ros2                  │
 └── static TF (base_lidar→laser)  └── /cmd_vel, /arm_controller/...
@@ -114,14 +114,19 @@ sudo apt install ros-humble-rmw-cyclonedds-cpp ros-humble-xacro \
 # 4. CycloneDDS 설정 (위의 "CycloneDDS 설정" 섹션 참고)
 # ~/cyclonedds.xml 생성 + .bashrc에 환경변수 추가
 
-# 5. 빌드 (필요한 패키지만)
+# 5. 스왑 추가 (RPi RAM 1GB인 경우, C++ 빌드 OOM 방지)
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+# 6. 빌드 (필요한 패키지만)
 cd ~/ugv_ws
 source /opt/ros/humble/setup.bash
 colcon build --packages-select ugv_bringup ugv_roarm_description ugv_description \
-  ugv_base_node ugv_interface ldlidar
+  rf2o_laser_odometry ugv_interface ldlidar
 source install/setup.bash
 
-# 6. bashrc에 자동 source 추가 (최초 1회)
+# 7. bashrc에 자동 source 추가 (최초 1회)
 echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
 echo "source ~/ugv_ws/install/setup.bash" >> ~/.bashrc
 ```
@@ -239,7 +244,14 @@ ros2 run ugv_roarm_description teleop_all.py --ros-args -p mode:=rviz
 
 ## Quick Start: 실제 로봇 SLAM (WSL + RPi)
 
-> LiDAR로 주변 환경을 스캔하며 2D 맵을 생성합니다. slam_toolbox 사용.
+> LiDAR로 주변 환경을 스캔하며 2D 맵을 생성합니다. Cartographer + rf2o_laser_odometry 사용.
+
+### 사전 조건
+
+```bash
+# WSL에 Cartographer 설치
+sudo apt install ros-humble-cartographer ros-humble-cartographer-ros
+```
 
 **총 3개의 터미널**이 필요합니다.
 
@@ -261,6 +273,7 @@ ros2 launch ugv_roarm_description slam_real.launch.py
 ```
 
 > RViz가 Top-Down 뷰로 열리며 LiDAR 스캔과 점진적으로 생성되는 맵이 표시됩니다.
+> rf2o_laser_odometry가 LiDAR 스캔 매칭으로 odom을 생성하고, Cartographer가 이를 사용하여 SLAM을 수행합니다.
 
 #### 터미널 3 — WSL: 키보드 텔레옵
 
@@ -274,9 +287,11 @@ ros2 run ugv_roarm_description teleop_all.py
 
 #### 맵 저장
 
-`Ctrl+C`로 SLAM을 종료하면 `~/maps/map_YYYYMMDD_HHMMSS.pgm/.yaml`에 자동 저장됩니다.
+`Ctrl+C`로 SLAM을 종료하면 `~/maps/` 에 자동 저장됩니다:
+- `map_YYYYMMDD_HHMMSS.pbstream` — Cartographer 내부 상태 (localization 재사용 가능)
+- `map_YYYYMMDD_HHMMSS.pgm/.yaml` — Nav2에서 사용할 occupancy grid 맵
 
-수동으로 저장하려면 새 터미널에서:
+수동으로 맵만 저장하려면 새 터미널에서:
 
 ```bash
 source ~/ugv_ws/install/setup.bash
@@ -390,6 +405,15 @@ ros2 run ugv_roarm_description teleop_all.py
 `M` 키로 전환. 로봇팔 끝단의 직교 좌표(X, Y, Z)를 직접 제어합니다.
 내부적으로 `roarm_m2` IK/FK 솔버를 사용하며, 도달 불가능한 위치로의 이동은 자동 무시됩니다.
 
+### 시작 시 자세 동기화
+
+시작 시 `/joint_states`에서 현재 로봇팔 관절값을 읽어와 초기 명령 상태를 동기화합니다.
+기존 자세를 유지한 채 바로 제어를 시작할 수 있습니다 (5초 타임아웃, 수신 실패 시 0으로 시작).
+
+### 실시간 피드백
+
+상태줄 하단에 `/joint_states` 피드백 값(FB)이 실시간으로 표시됩니다.
+
 ---
 
 ## 아키텍처
@@ -401,8 +425,8 @@ ros2 run ugv_roarm_description teleop_all.py
 teleop_all.py                                  rasp_bringup.launch.py
   ├─ /cmd_vel ──────┐                            ├─ ugv_driver (/dev/ttyAMA0)
   ├─ /arm_controller │     CycloneDDS             ├─ roarm_driver (/dev/ttyUSB0)
-  │   /joint_trajectory┤  ←── DDS direct ──→       ├─ base_node (odom)
-  ├─ /roarm/gripper_cmd┘                           ├─ ugv_bringup (IMU, encoder)
+  │   /joint_trajectory┤  ←── DDS direct ──→       ├─ rf2o_laser_odometry (odom)
+  ├─ /roarm/gripper_cmd┘                           ├─ ugv_bringup (IMU, voltage)
   │                                                 ├─ ldlidar_ros2 (/dev/ttyUSB1)
   │  ← /joint_states, /scan, /odom, /imu ←         └─ static TF (lidar→laser)
   │
@@ -440,10 +464,11 @@ ugv_roarm_description/
 ├── scripts/
 │   └── teleop_all.py              # 통합 키보드 텔레옵 노드
 ├── config/
-│   ├── ugv_arm_controllers.yaml   # ros2_control 컨트롤러 설정
-│   ├── ugv_arm_ros2_control.xacro # ros2_control 하드웨어 인터페이스
-│   ├── slam_toolbox.yaml          # SLAM 파라미터
-│   └── nav2_params.yaml           # Nav2 자율주행 파라미터
+│   ├── ugv_arm_controllers.yaml       # ros2_control 컨트롤러 설정
+│   ├── ugv_arm_ros2_control.xacro     # ros2_control 하드웨어 인터페이스
+│   ├── cartographer_mapping_2d.lua    # Cartographer SLAM 설정
+│   ├── slam_toolbox.yaml              # SLAM 파라미터 (레거시, 롤백용)
+│   └── nav2_params.yaml               # Nav2 자율주행 파라미터
 ├── rviz/
 │   ├── view_ugv_roarm.rviz        # 기본 RViz 설정
 │   ├── remote_view.rviz           # 원격 제어용 RViz 설정
@@ -466,8 +491,7 @@ ugv_roarm_description/
 | `/gripper_controller/gripper_cmd` | `control_msgs/GripperCommand` | 그리퍼 제어 (Gazebo) |
 | `/joint_states` | `sensor_msgs/JointState` | 관절 상태 피드백 |
 | `/scan` | `sensor_msgs/LaserScan` | 2D LiDAR |
-| `/odom` | `nav_msgs/Odometry` | 오도메트리 |
-| `/odom/odom_raw` | `std_msgs/Float32MultiArray` | 인코더 원시값 [L, R] |
+| `/odom` | `nav_msgs/Odometry` | 오도메트리 (rf2o_laser_odometry) |
 | `/imu/data` | `sensor_msgs/Imu` | IMU 방위 (쿼터니언) |
 | `/voltage` | `std_msgs/Float32` | 배터리 전압 (V) |
 
@@ -486,7 +510,7 @@ cd ~/ugv_ws
 git pull origin ros2-humble-develop
 cd src/ugv_main/ugv_roarm_description && git pull origin main
 cd ~/ugv_ws
-colcon build --packages-select ugv_bringup ugv_base_node ugv_roarm_description
+colcon build --packages-select ugv_bringup rf2o_laser_odometry ugv_roarm_description
 source install/setup.bash
 ```
 
@@ -501,15 +525,21 @@ source install/setup.bash
 
 > `ugv_driver`는 `cmd_vel`의 `linear.x`를 부호 반전하여 ESP32에 전달합니다 (ESP32 모터 방향이 URDF 규약과 반대).
 
-### base_node
+### rf2o_laser_odometry
+
+LiDAR 스캔 매칭 기반 오도메트리. Wave Rover는 인코더가 없으므로 cmd_vel dead reckoning 대신 rf2o를 사용합니다.
 
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
-| `pub_odom_tf` | `false` | odom → base_footprint TF 발행 여부 |
-| `use_cmd_vel_odom` | `false` | `true`: cmd_vel + IMU yaw dead reckoning으로 오도메트리 추정 (인코더 없는 로봇용). `false`: 인코더 기반 오도메트리 |
-| `wheel_separation` | `0.175` | 좌우 바퀴 간 거리 (m). 인코더 모드에서만 사용 |
+| `laser_scan_topic` | `/scan` | LiDAR 스캔 토픽 |
+| `odom_topic` | `/odom` | 발행할 오도메트리 토픽 |
+| `publish_tf` | `true` | odom → base_footprint TF 발행 여부 |
+| `base_frame_id` | `base_footprint` | 로봇 베이스 프레임 |
+| `odom_frame_id` | `odom` | 오도메트리 프레임 |
+| `laser_frame_id` | `base_laser` | LiDAR 프레임 |
+| `freq` | `20.0` | 오도메트리 계산 주기 (Hz) |
 
-> Wave Rover는 인코더가 없으므로 `rasp_bringup.launch.py`에서 `use_cmd_vel_odom: true`로 설정되어 있습니다.
+> RPi에서 빌드 시 RAM 부족으로 OOM이 발생할 수 있습니다. 2GB 스왑 추가 후 `--parallel-workers 1`로 빌드하세요.
 
 ### roarm_driver
 
@@ -529,8 +559,8 @@ source install/setup.bash
 | WSL에서 RPi 토픽 안 보임 | CycloneDDS 미설정 | `~/cyclonedds.xml` 확인 + `RMW_IMPLEMENTATION`, `CYCLONEDDS_URI` 환경변수 확인 |
 | `ros2 topic list`에 RPi 토픽 없음 | 네트워크/방화벽 문제 | `ping 192.168.0.71` 확인, WSL 방화벽 규칙 확인 |
 | 로봇이 RViz에서 안 움직임 | teleop 미실행 또는 Fixed Frame 설정 | teleop 실행 + Fixed Frame을 `odom`으로 설정 |
-| SLAM에서 odom 위치가 안 변함 | `use_cmd_vel_odom` 미설정 | base_node에 `use_cmd_vel_odom: true` 파라미터 추가 (인코더 없는 로봇) |
-| SLAM에서 로봇이 반대로 움직임 | dead reckoning 부호 불일치 | `base_node.cpp`의 `cmd_linear_x_` 부호 확인 |
+| SLAM에서 odom 위치가 안 변함 | rf2o가 /scan 수신 못함 | `ros2 topic echo /scan --once`로 LiDAR 데이터 확인, `laser_frame_id` 파라미터 확인 |
+| RPi에서 rf2o 빌드 중 멈춤 | RAM 부족 (C++ Eigen 컴파일) | 2GB 스왑 추가 후 `colcon build --parallel-workers 1` |
 | 로봇팔 토크 걸리지만 안 움직임 | 전압 부족 (5V) | UPS BAT 포트에서 12V 공급. 5V 포트 사용 불가 |
 | 팔 관절 움직이면 그리퍼 토크 풀림 | `roarm_driver` 미업데이트 | RPi에서 `ugv_bringup` 리빌드 |
 | roarm_driver SerialException | 시리얼 포트 다중 접근 | 수동 테스트 스크립트 종료 후 launch 재시작 |

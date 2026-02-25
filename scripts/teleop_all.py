@@ -320,12 +320,13 @@ class TeleopAll(Node):
             self.fixed_joints, self.dynamic_joints = _load_model_config(model_name)
         self.get_logger().info(f"Loaded model config: {model_name}")
 
-        # ── Common state ──────────────────────────────────────
+        # ── Common state (will be synced from /joint_states) ──
         self.joint_positions = {j: 0.0 for j in ARM_JOINTS}
         self.joint_positions[GRIPPER_JOINT] = 0.0
         for wj in WHEEL_JOINTS:
             self.joint_positions[wj] = 0.0
         self.grip_level = 0.0  # 0=closed, GRIPPER_GRIP_MAX=fully open
+        self._synced = False  # True after initial sync from /joint_states
         self.drive_speed = 0.3
         self.turn_speed = 2.0
         self.selected_joint = 0
@@ -342,6 +343,11 @@ class TeleopAll(Node):
         self.gripper_float_pub = self.create_publisher(
             Float64, '/roarm/gripper_cmd', 1)
 
+        # Subscribe to joint_states for real-time feedback (all modes)
+        self.feedback_positions = {}
+        self.create_subscription(
+            JointState, '/joint_states', self._joint_state_cb, 10)
+
         if self.mode == 'gazebo':
             self._init_gazebo()
         else:
@@ -350,8 +356,6 @@ class TeleopAll(Node):
     def _init_gazebo(self):
         self.gripper_client = ActionClient(
             self, GripperCommand, '/gripper_controller/gripper_cmd')
-        self.create_subscription(
-            JointState, '/joint_states', self._joint_state_cb, 10)
 
     def _init_rviz(self):
         self.tf_broadcaster = TransformBroadcaster(self)
@@ -372,12 +376,20 @@ class TeleopAll(Node):
     # ── Callbacks ─────────────────────────────────────────────
     def _joint_state_cb(self, msg: JointState):
         for name, pos in zip(msg.name, msg.position):
-            if name == GRIPPER_JOINT:
-                # ESP32 feedback (high=closed) → grip_level (high=open)
-                self.grip_level = GRIPPER_GRIP_MAX - pos / GRIPPER_ESP32_SCALE
-                self.joint_positions[name] = -self.grip_level
-            elif name in self.joint_positions:
-                self.joint_positions[name] = pos
+            self.feedback_positions[name] = pos
+
+    def sync_from_feedback(self):
+        """Copy current feedback into command state (one-time init)."""
+        for j in ARM_JOINTS:
+            if j in self.feedback_positions:
+                self.joint_positions[j] = self.feedback_positions[j]
+        if GRIPPER_JOINT in self.feedback_positions:
+            # grip_level is the positive magnitude; URDF stores -grip_level
+            self.grip_level = clamp(
+                -self.feedback_positions[GRIPPER_JOINT],
+                0.0, GRIPPER_GRIP_MAX)
+            self.joint_positions[GRIPPER_JOINT] = -self.grip_level
+        self._synced = True
 
     # ── Input ─────────────────────────────────────────────────
     def get_key(self):
@@ -532,14 +544,39 @@ class TeleopAll(Node):
             arm_str = (f'Arm[TCP]: {axis} '
                        f'tcp=({tx:.1f}, {ty:.1f}, {tz:.1f})mm '
                        f'step={self.tcp_step:.1f}mm')
-        sys.stdout.write(f'\r  {drive_str}  |  {arm_str}  |  {grip_str}  ')
+
+        # Joint feedback from /joint_states
+        j1 = self.feedback_positions.get(ARM_JOINTS[0], float('nan'))
+        j2 = self.feedback_positions.get(ARM_JOINTS[1], float('nan'))
+        j3 = self.feedback_positions.get(ARM_JOINTS[2], float('nan'))
+        gr = self.feedback_positions.get(GRIPPER_JOINT, float('nan'))
+        fb_str = f'FB: J1={math.degrees(j1):+6.1f} J2={math.degrees(j2):+6.1f} J3={math.degrees(j3):+6.1f} G={math.degrees(gr):+6.1f}'
+
+        # Save cursor, move to line 1, print, restore cursor
+        line1 = f'  {drive_str}  |  {arm_str}  |  {grip_str}'
+        line2 = f'  {fb_str}'
+        sys.stdout.write(f'\033[2F\033[K{line1}\n\033[K{line2}\n')
         sys.stdout.flush()
 
 
 def main():
     rclpy.init()
     node = TeleopAll()
+
+    # Wait for /joint_states to sync current arm pose
+    print('Waiting for /joint_states ...', end='', flush=True)
+    timeout = time.monotonic() + 5.0
+    while not node.feedback_positions and time.monotonic() < timeout:
+        rclpy.spin_once(node, timeout_sec=0.1)
+    if node.feedback_positions:
+        node.sync_from_feedback()
+        print(' OK')
+    else:
+        print(' timeout (starting from zeros)')
+
     print(BANNER_JOINT.format(mode=node.mode.upper()))
+    print()  # placeholder for status line
+    print()  # placeholder for feedback line
     node.print_status()
 
     x = 0.0
@@ -583,6 +620,8 @@ def main():
                     node.arm_control_mode = 'joint'
                     banner = BANNER_JOINT
                 print(banner.format(mode=node.mode.upper()))
+                print()  # placeholder for status line
+                print()  # placeholder for feedback line
                 node.print_status()
 
             # ── Arm keys ──────────────────────────────────────
@@ -645,6 +684,10 @@ def main():
                 node.publish_rviz_state(
                     node.drive_speed * x,
                     node.turn_speed * th)
+
+            # Process incoming messages (joint_states callback)
+            rclpy.spin_once(node, timeout_sec=0)
+            node.print_status()
 
     except Exception as e:
         print(e)

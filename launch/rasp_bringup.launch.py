@@ -40,18 +40,21 @@ def generate_launch_description():
         parameters=[{'steering_bias': 0.1}],
     )
 
-    # 4. Base Node — odometry calculation + odom -> base_footprint TF
-    base_node = Node(
-        package='ugv_base_node',
-        executable='base_node',
-        name='base_node',
+    # 4. rf2o_laser_odometry — LiDAR scan-based odometry + odom -> base_footprint TF
+    rf2o_node = Node(
+        package='rf2o_laser_odometry',
+        executable='rf2o_laser_odometry_node',
+        name='rf2o_laser_odometry',
         output='screen',
         parameters=[{
-            'pub_odom_tf': True,
-            'use_cmd_vel_odom': True,
-            'use_imu_yaw': False,
-            'yaw_scale': 0.5,
-        }]
+            'laser_scan_topic': '/scan',
+            'odom_topic': '/odom',
+            'publish_tf': True,
+            'base_frame_id': 'base_footprint',
+            'odom_frame_id': 'odom',
+            'laser_frame_id': 'base_laser',
+            'freq': 20.0,
+        }],
     )
 
     # 5. RoArm-M2 Driver — /arm_controller/joint_trajectory -> ESP32 serial
@@ -104,7 +107,7 @@ def generate_launch_description():
         robot_state_publisher_node,
         ugv_bringup_node,
         ugv_driver_node,
-        base_node,
+        rf2o_node,
         roarm_driver_node,
         ldlidar_node,
         lidar_static_tf,

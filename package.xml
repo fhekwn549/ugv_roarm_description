@@ -26,7 +26,8 @@
   <exec_depend>control_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
-  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>cartographer_ros</exec_depend>
+  <exec_depend>rf2o_laser_odometry</exec_depend>
   <exec_depend>nav2_bringup</exec_depend>
   <exec_depend>nav2_map_server</exec_depend>
   <exec_depend>nav2_amcl</exec_depend>
