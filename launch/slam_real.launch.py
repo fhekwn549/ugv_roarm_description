@@ -76,23 +76,23 @@ def generate_launch_description():
         # Map auto-saver: saves pbstream + pgm/yaml on Ctrl+C
         ExecuteProcess(
             cmd=['bash', '-c',
-                 f'trap "'
-                 f'echo [map_saver] Finishing trajectory and saving pbstream... ; '
-                 f'ros2 service call /finish_trajectory '
-                 f'cartographer_ros_msgs/srv/FinishTrajectory '
-                 f'\"\\{{trajectory_id: 0\\}}\" 2>/dev/null ; '
-                 f'sleep 1 ; '
-                 f'ros2 service call /write_state '
-                 f'cartographer_ros_msgs/srv/WriteState '
-                 f'\"\\{{filename: \\\"{pbstream_path}\\\", '
-                 f'include_unfinished_submaps: true\\}}\" 2>/dev/null ; '
-                 f'sleep 1 ; '
-                 f'echo [map_saver] Saving occupancy grid map... ; '
-                 f'ros2 run nav2_map_server map_saver_cli -f {map_path} 2>/dev/null ; '
-                 f'echo [map_saver] Done: {map_path}.pgm/.yaml + {pbstream_path} ; '
-                 f'exit 0'
-                 f'" INT TERM; '
-                 f'while true; do sleep 1; done'],
+                 f"cleanup() {{ "
+                 f"echo '[map_saver] Finishing trajectory and saving pbstream...'; "
+                 f"ros2 service call /finish_trajectory "
+                 f"cartographer_ros_msgs/srv/FinishTrajectory "
+                 f"'{{trajectory_id: 0}}' 2>/dev/null; "
+                 f"sleep 1; "
+                 f"ros2 service call /write_state "
+                 f"cartographer_ros_msgs/srv/WriteState "
+                 f"'{{filename: \"{pbstream_path}\", "
+                 f"include_unfinished_submaps: true}}' 2>/dev/null; "
+                 f"sleep 1; "
+                 f"echo '[map_saver] Saving occupancy grid map...'; "
+                 f"ros2 run nav2_map_server map_saver_cli -f {map_path} 2>/dev/null; "
+                 f"echo '[map_saver] Done: {map_path}.pgm/.yaml + {pbstream_path}'; "
+                 f"exit 0; "
+                 f"}}; trap cleanup INT TERM; "
+                 f"while true; do sleep 1; done"],
             output='screen',
         ),
     ])

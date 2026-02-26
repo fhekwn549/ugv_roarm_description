@@ -45,18 +45,23 @@ TRAJECTORY_BUILDER_2D.real_time_correlative_scan_matcher.translation_delta_cost_
 TRAJECTORY_BUILDER_2D.real_time_correlative_scan_matcher.rotation_delta_cost_weight = 1e-1
 
 -- Ceres scan matcher
-TRAJECTORY_BUILDER_2D.ceres_scan_matcher.occupied_space_weight = 1.
-TRAJECTORY_BUILDER_2D.ceres_scan_matcher.translation_weight = 10.
+TRAJECTORY_BUILDER_2D.ceres_scan_matcher.occupied_space_weight = 10.
+TRAJECTORY_BUILDER_2D.ceres_scan_matcher.translation_weight = 1.
 TRAJECTORY_BUILDER_2D.ceres_scan_matcher.rotation_weight = 40.
 
--- Submaps
-TRAJECTORY_BUILDER_2D.submaps.num_range_data = 90
+-- Motion filter: only insert scan when robot has moved/rotated enough
+TRAJECTORY_BUILDER_2D.motion_filter.max_distance_meters = 0.1
+TRAJECTORY_BUILDER_2D.motion_filter.max_angle_radians = math.rad(2.)
+TRAJECTORY_BUILDER_2D.motion_filter.max_time_seconds = 3.
+
+-- Submaps (smaller submaps = less accumulated error)
+TRAJECTORY_BUILDER_2D.submaps.num_range_data = 35
 TRAJECTORY_BUILDER_2D.submaps.grid_options_2d.resolution = 0.05
 
--- Pose graph optimization
-POSE_GRAPH.optimize_every_n_nodes = 90
-POSE_GRAPH.constraint_builder.min_score = 0.65
-POSE_GRAPH.constraint_builder.global_localization_min_score = 0.7
+-- Pose graph optimization (more frequent = better consistency)
+POSE_GRAPH.optimize_every_n_nodes = 35
+POSE_GRAPH.constraint_builder.min_score = 0.55
+POSE_GRAPH.constraint_builder.global_localization_min_score = 0.6
 POSE_GRAPH.optimization_problem.huber_scale = 1e2
 
 return options
