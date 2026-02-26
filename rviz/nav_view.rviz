@@ -54,11 +54,15 @@ Visualization Manager:
         Value: /map
         Depth: 1
         Reliability Policy: Reliable
+        Durability Policy: Transient Local
       Alpha: 0.7
       Color Scheme: map
       Draw Behind: true
       Update Topic:
         Value: /map_updates
+        Depth: 1
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
     - Class: rviz_default_plugins/Path
       Name: Global Path
       Enabled: true

@@ -31,7 +31,6 @@ def generate_launch_description():
         'controller_server',
         'behavior_server',
         'bt_navigator',
-        'velocity_smoother',
     ]
 
     return LaunchDescription([
@@ -96,18 +95,7 @@ def generate_launch_description():
             parameters=[nav2_params],
         ),
 
-        # --- Nav2: Velocity Smoother ---
-        Node(
-            package='nav2_velocity_smoother',
-            executable='velocity_smoother',
-            name='velocity_smoother',
-            output='screen',
-            parameters=[nav2_params],
-            remappings=[
-                ('cmd_vel', 'cmd_vel_nav'),
-                ('cmd_vel_smoothed', 'cmd_vel'),
-            ],
-        ),
+        # velocity_smoother disabled — motor deadband too high for gradual ramp-up
 
         # --- Nav2: Lifecycle Manager ---
         Node(
