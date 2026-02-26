@@ -35,23 +35,27 @@ RPi와 WSL 양쪽에 동일한 설정 파일이 필요합니다.
 
 **`~/cyclonedds.xml`:**
 ```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<CycloneDDS xmlns="https://cdds.io/config">
+<CycloneDDS>
   <Domain>
     <General>
+      <AllowMulticast>spdp</AllowMulticast>
       <Interfaces>
-        <NetworkInterface name="eth0" />  <!-- RPi: eth0, WSL: eth0 -->
+        <NetworkInterface name="eth0" />  <!-- RPi: eth0, WSL: eth1 등 환경에 맞게 -->
       </Interfaces>
     </General>
     <Discovery>
       <Peers>
         <Peer address="192.168.0.71" />   <!-- RPi IP -->
-        <Peer address="192.168.0.XXX" />  <!-- WSL IP -->
+        <Peer address="localhost" />
       </Peers>
+      <ParticipantIndex>auto</ParticipantIndex>
+      <MaxAutoParticipantIndex>120</MaxAutoParticipantIndex>
     </Discovery>
   </Domain>
 </CycloneDDS>
 ```
+
+> Nav2 스택은 많은 노드를 생성하므로 `MaxAutoParticipantIndex`를 120 이상으로 설정해야 합니다. 기본값(10)에서는 "Failed to find a free participant index" 오류가 발생합니다.
 
 **환경변수 (`.bashrc`):**
 ```bash
@@ -287,16 +291,44 @@ ros2 run ugv_roarm_description teleop_all.py
 
 #### 맵 저장
 
-`Ctrl+C`로 SLAM을 종료하면 `~/maps/` 에 자동 저장됩니다:
-- `map_YYYYMMDD_HHMMSS.pbstream` — Cartographer 내부 상태 (localization 재사용 가능)
-- `map_YYYYMMDD_HHMMSS.pgm/.yaml` — Nav2에서 사용할 occupancy grid 맵
-
-수동으로 맵만 저장하려면 새 터미널에서:
+SLAM 실행 중에 **새 터미널에서 수동으로 저장**해야 합니다:
 
 ```bash
 source ~/ugv_ws/install/setup.bash
-ros2 run nav2_map_server map_saver_cli -f ~/map
+
+# 1. Cartographer trajectory 마무리
+ros2 service call /finish_trajectory cartographer_ros_msgs/srv/FinishTrajectory "{trajectory_id: 0}"
+
+# 2. pbstream 저장 (Cartographer 내부 상태)
+ros2 service call /write_state cartographer_ros_msgs/srv/WriteState "{filename: '$HOME/maps/my_map.pbstream'}"
+
+# 3. occupancy grid 맵 저장 (Nav2에서 사용)
+ros2 run nav2_map_server map_saver_cli -f ~/maps/my_map
 ```
+
+저장되는 파일:
+- `my_map.pbstream` — Cartographer 내부 상태 (localization 재사용 가능)
+- `my_map.pgm` / `my_map.yaml` — Nav2에서 사용할 occupancy grid 맵
+
+> **주의:** `Ctrl+C` 자동 저장은 레이스 컨디션으로 실패할 수 있습니다 (cartographer_node가 서비스 콜보다 먼저 종료). 반드시 수동 저장 후 `Ctrl+C`를 누르세요.
+
+#### 맵 편집 (유리벽 등 불필요 영역 제거)
+
+```bash
+# PGM → PNG 변환 (편집 프로그램 호환성)
+convert ~/maps/my_map.pgm ~/maps/my_map.png
+
+# Windows에서 편집 (WSL2)
+cp ~/maps/my_map.png /mnt/c/Users/$USER/Desktop/
+# → Windows 그림판에서 편집: 불필요 영역을 RGB(205,205,205)로 칠하기
+# → 저장 후 다시 복사
+
+# PNG → PGM 변환
+cp /mnt/c/Users/$USER/Desktop/my_map.png ~/maps/my_map.png
+convert ~/maps/my_map.png ~/maps/my_map.pgm
+```
+
+> PGM 색상 의미: 흰색(254)=자유공간, 검정(0)=장애물, 회색(205)=미지 영역
 
 ---
 
@@ -346,10 +378,12 @@ ros2 run ugv_roarm_description teleop_all.py
 
 ### RViz에서 자율주행 사용법
 
-1. **초기 위치 설정**: RViz 상단 도구에서 `2D Pose Estimate` 클릭 → 맵 위에서 로봇의 실제 위치와 방향을 드래그하여 설정
-2. **AMCL 수렴 확인**: 파란 파티클 클라우드가 로봇 주변에 모일 때까지 대기 (또는 텔레옵으로 약간 회전)
-3. **목표점 설정**: `Nav2 Goal` 클릭 → 맵 위에서 목표 위치와 방향을 드래그하여 설정
+1. **초기 위치 설정**: RViz 상단 도구에서 `2D Pose Estimate` 클릭 → 맵 위에서 로봇의 실제 위치에서 실제 방향으로 드래그 (클릭=위치, 드래그 방향=로봇 heading)
+2. **AMCL 수렴 확인**: 파란 파티클 클라우드가 로봇 주변에 모이고 LiDAR 스캔(빨강)이 맵 벽과 겹칠 때까지 대기 (텔레옵으로 약간 회전하면 수렴 가속)
+3. **목표점 설정**: `Nav2 Goal` 클릭 → 목표 위치에서 원하는 도착 방향으로 드래그
 4. 로봇이 전역 경로(초록선)를 따라 자율주행합니다
+
+> **velocity_smoother 비활성화:** 이 로봇의 모터 데드밴드가 높아서 velocity_smoother의 점진적 가속이 실제 움직임을 만들지 못합니다. nav_real.launch.py에서 제거되었으며, controller_server가 `/cmd_vel`에 직접 publish합니다.
 
 ### 실행 순서 요약
 
@@ -537,6 +571,7 @@ LiDAR 스캔 매칭 기반 오도메트리. Wave Rover는 인코더가 없으므
 | `base_frame_id` | `base_footprint` | 로봇 베이스 프레임 |
 | `odom_frame_id` | `odom` | 오도메트리 프레임 |
 | `laser_frame_id` | `base_laser` | LiDAR 프레임 |
+| `init_pose_from_topic` | `''` (빈 문자열) | 초기 위치 토픽. 비워야 즉시 시작. 기본값(`/base_pose_ground_truth`)은 존재하지 않아 영원히 대기 |
 | `freq` | `20.0` | 오도메트리 계산 주기 (Hz) |
 
 > RPi에서 빌드 시 RAM 부족으로 OOM이 발생할 수 있습니다. 2GB 스왑 추가 후 `--parallel-workers 1`로 빌드하세요.
@@ -568,3 +603,8 @@ LiDAR 스캔 매칭 기반 오도메트리. Wave Rover는 인코더가 없으므
 | 직진 시 한쪽으로 치우침 | 좌/우 바퀴 저항 차이 | `steering_bias` 파라미터 조정 (rasp_bringup 기본값 0.1) |
 | WSL2에서 RViz 크래시 | GPU 호환성 | `LIBGL_ALWAYS_SOFTWARE=1` 환경변수 설정 |
 | 그리퍼 방향 반대 | roarm_driver 버전 불일치 | RPi에서 git pull + 리빌드 |
+| rf2o "Waiting for laser_scans..." 멈춤 | `init_pose_from_topic` 기본값이 존재하지 않는 토픽 | launch에서 `'init_pose_from_topic': ''` 설정 (빈 문자열) |
+| Nav2 "Failed to find a free participant index" | CycloneDDS 참가자 한도 초과 | `cyclonedds.xml`에 `MaxAutoParticipantIndex: 120` 추가 |
+| RViz에서 맵이 안 보임 (Nav2) | Map 토픽 QoS 불일치 | RViz Map display의 Durability Policy를 `Transient Local`로 설정 |
+| Nav2 Goal 후 로봇이 안 움직임 | 모터 데드밴드보다 낮은 속도 명령 | `nav2_params.yaml`에서 `min_vel_x`, `min_speed_xy` 증가 (0.05 이상) |
+| Nav2 회전 후 AMCL 위치 틀어짐 | rf2o odom drift + AMCL 업데이트 느림 | `update_min_a: 0.05`, `alpha1/2/4: 0.5`로 설정, 파티클 수 증가 |
