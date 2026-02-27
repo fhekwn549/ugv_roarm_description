@@ -1,13 +1,16 @@
 """
-Real Robot Navigation Launch File
+Real Robot Navigation Launch File (Cartographer Localization)
 
-SLAM으로 생성한 맵을 기반으로 Nav2 자율주행을 실행합니다.
+Cartographer .pbstream을 로드하여 자동 초기 위치 인식 + Nav2 자율주행을 실행합니다.
+AMCL과 달리 수동 initial pose 설정이 필요 없습니다.
+
 RPi에서 rasp_bringup.launch.py 실행 후,
-WSL에서 이 launch 파일을 실행하면 Nav2 스택 + RViz가 함께 뜹니다.
+WSL에서 이 launch 파일을 실행하면 Nav2 스택이 뜹니다.
 CycloneDDS를 통해 RPi의 토픽이 자동으로 수신됩니다.
+시각화는 웹 대시보드(ugv_dashboard)를 사용합니다.
 
 Usage:
-  ros2 launch ugv_roarm_description nav_real.launch.py map:=~/maps/map_20250101_120000.yaml
+  ros2 launch ugv_roarm_description nav_real.launch.py pbstream:=~/maps/lab_map.pbstream
 """
 
 import os
@@ -21,12 +24,15 @@ from ament_index_python.packages import get_package_share_directory
 def generate_launch_description():
 
     pkg_dir = get_package_share_directory('ugv_roarm_description')
+    cartographer_dir = get_package_share_directory('cartographer')
     nav2_params = os.path.join(pkg_dir, 'config', 'nav2_params.yaml')
-    rviz_config = os.path.join(pkg_dir, 'rviz', 'nav_view.rviz')
+    cartographer_config_dir = os.path.join(cartographer_dir, 'config')
+
+    pbstream_path = LaunchConfiguration('pbstream')
+    resolution = LaunchConfiguration('resolution')
+    publish_period_sec = LaunchConfiguration('publish_period_sec')
 
     lifecycle_nodes = [
-        'map_server',
-        'amcl',
         'planner_server',
         'controller_server',
         'behavior_server',
@@ -35,28 +41,45 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument(
-            'map',
-            description='Full path to map YAML file (e.g. ~/maps/map.yaml)'),
+            'pbstream',
+            default_value=os.path.expanduser('~/maps/lab_map.pbstream'),
+            description='Full path to Cartographer .pbstream file'),
 
-        # --- Nav2: Map Server ---
+        DeclareLaunchArgument(
+            'resolution',
+            default_value='0.05',
+            description='Resolution of the published occupancy grid'),
+
+        DeclareLaunchArgument(
+            'publish_period_sec',
+            default_value='1.0',
+            description='OccupancyGrid publishing period'),
+
+        # --- Cartographer: Localization (replaces map_server + amcl) ---
         Node(
-            package='nav2_map_server',
-            executable='map_server',
-            name='map_server',
+            package='cartographer_ros',
+            executable='cartographer_node',
+            name='cartographer_node',
             output='screen',
-            parameters=[
-                nav2_params,
-                {'yaml_filename': LaunchConfiguration('map')},
+            parameters=[{'use_sim_time': False}],
+            arguments=[
+                '-configuration_directory', cartographer_config_dir,
+                '-configuration_basename', 'localization_2d.lua',
+                '-load_state_filename', pbstream_path,
             ],
         ),
 
-        # --- Nav2: AMCL ---
+        # --- Cartographer: OccupancyGrid publisher (provides /map) ---
         Node(
-            package='nav2_amcl',
-            executable='amcl',
-            name='amcl',
+            package='cartographer_ros',
+            executable='cartographer_occupancy_grid_node',
+            name='cartographer_occupancy_grid_node',
             output='screen',
-            parameters=[nav2_params],
+            parameters=[{'use_sim_time': False}],
+            arguments=[
+                '-resolution', resolution,
+                '-publish_period_sec', publish_period_sec,
+            ],
         ),
 
         # --- Nav2: Planner Server ---
@@ -110,13 +133,4 @@ def generate_launch_description():
             }],
         ),
 
-        # --- RViz2 with Nav2 view (software rendering for WSL2) ---
-        Node(
-            package='rviz2',
-            executable='rviz2',
-            name='rviz2',
-            output='screen',
-            arguments=['-d', rviz_config],
-            additional_env={'LIBGL_ALWAYS_SOFTWARE': '1'}
-        ),
     ])
