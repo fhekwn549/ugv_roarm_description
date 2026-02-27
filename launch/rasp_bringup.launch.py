@@ -93,7 +93,15 @@ def generate_launch_description():
         }],
     )
 
-    # 7. Static TF: base_lidar_link → base_laser
+    # 7. UGV Bridge — MQTT + REST API bridge for web dashboard
+    bridge_node = Node(
+        package='ugv_bridge',
+        executable='bridge_node',
+        name='ugv_bridge',
+        output='screen',
+    )
+
+    # 8. Static TF: base_lidar_link → base_laser
     # LiDAR publishes with frame_id 'base_laser', URDF has 'base_lidar_link'
     # yaw=π/2: LiDAR physical mounting is 90° rotated from URDF assumption
     lidar_static_tf = Node(
@@ -111,5 +119,6 @@ def generate_launch_description():
         rf2o_node,
         roarm_driver_node,
         ldlidar_node,
+        bridge_node,
         lidar_static_tf,
     ])
