@@ -8,10 +8,11 @@ Waveshare UGV Rover (4WD skid-steer) 위에 RoArm-M2 (4-DOF + gripper) 로봇팔
 
 | 리포 | 역할 | 내용 |
 |------|------|------|
-| **이 리포 (`ugv_roarm_description`)** | 로봇 정의 + 실행 구성 | URDF, launch, Gazebo 시뮬레이션, 텔레옵 |
-| [fhekwn549/ugv_ws](https://github.com/fhekwn549/ugv_ws) | 하드웨어 구동 | 시리얼 드라이버, 센서 처리, 오도메트리 |
+| **이 리포 (`ugv_roarm_description`)** | 로봇 정의 + 실행 구성 | URDF, launch, Gazebo 시뮬레이션, 텔레옵, Nav2 |
+| [fhekwn549/ugv_ws](https://github.com/fhekwn549/ugv_ws) | 하드웨어 구동 + 웹 브릿지 | 시리얼 드라이버, 센서 처리, MQTT/REST 브릿지 (`ugv_bridge`) |
+| [fhekwn549/ugv_dashboard](https://github.com/fhekwn549/ugv_dashboard) | 웹 대시보드 프론트엔드 | Vue 3 + MQTT.js, 맵/LiDAR 시각화, 원격 제어 |
 
-RPi에서는 두 리포 모두 필요합니다. 이 리포의 `rasp_bringup.launch.py`가 `ugv_ws`의 드라이버 노드들을 실행합니다.
+RPi에서는 `ugv_roarm_description` + `ugv_ws` 두 리포가 필요합니다. 이 리포의 `rasp_bringup.launch.py`가 `ugv_ws`의 드라이버 노드들과 `ugv_bridge`를 실행합니다. 웹 대시보드(`ugv_dashboard`)는 별도로 빌드하여 `ugv_bridge`의 FastAPI가 정적 파일을 서빙합니다.
 
 ---
 
@@ -26,6 +27,9 @@ RPi (rasp_bringup.launch.py)                WSL (slam_real / nav_real / remote_v
 ├── rf2o_laser_odometry (odom + TF) ←DDS──  └── teleop_all.py
 ├── roarm_driver                  │
 ├── ldlidar_ros2                  │
+├── ugv_bridge (MQTT + REST)      │         웹 브라우저 (ugv_dashboard)
+│   ├── FastAPI (:8080) ←─────────────────  ├── Vue 3 + MQTT.js
+│   └── MQTT (:1884/ws) ─────────────────→  └── 맵/LiDAR 시각화, 원격 제어
 └── static TF (base_lidar→laser)  └── /cmd_vel, /arm_controller/...
 ```
 
@@ -109,11 +113,12 @@ cd ~/ugv_ws/src/ugv_main
 git clone https://github.com/fhekwn549/ugv_roarm_description.git
 
 # 2. Python 의존성 설치
-pip3 install pyserial
+pip3 install pyserial fastapi uvicorn paho-mqtt
 
 # 3. apt 패키지 설치
 sudo apt install ros-humble-rmw-cyclonedds-cpp ros-humble-xacro \
-  ros-humble-robot-state-publisher ros-humble-joint-state-publisher
+  ros-humble-robot-state-publisher ros-humble-joint-state-publisher \
+  mosquitto
 
 # 4. CycloneDDS 설정 (위의 "CycloneDDS 설정" 섹션 참고)
 # ~/cyclonedds.xml 생성 + .bashrc에 환경변수 추가
@@ -126,8 +131,8 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 # 6. 빌드 (필요한 패키지만)
 cd ~/ugv_ws
 source /opt/ros/humble/setup.bash
-colcon build --packages-select ugv_bringup ugv_roarm_description ugv_description \
-  rf2o_laser_odometry ugv_interface ldlidar
+colcon build --packages-select ugv_bringup ugv_bridge ugv_roarm_description \
+  ugv_description rf2o_laser_odometry ugv_interface ldlidar
 source install/setup.bash
 
 # 7. bashrc에 자동 source 추가 (최초 1회)
@@ -366,6 +371,16 @@ ros2 launch ugv_roarm_description nav_real.launch.py map:=~/maps/map_20250101_12
 > Nav2 lifecycle 노드들이 순서대로 활성화됩니다 (map_server → amcl → planner → controller → ...).
 > 모든 노드가 `active` 상태가 되면 자율주행 준비 완료입니다.
 
+#### 웹 대시보드 (RViz 대안)
+
+RViz 없이 웹 브라우저에서 자율주행을 제어할 수도 있습니다. `rasp_bringup.launch.py`가 `ugv_bridge`를 자동 실행하며, 웹 대시보드에서 맵 위 로봇 위치 확인, 클릭으로 Nav2 목표 전송, 경로 표시가 가능합니다.
+
+```bash
+# 웹 대시보드 접속
+# 브라우저에서 http://192.168.0.71:8080 (RPi에서 서빙)
+# 또는 개발 모드: cd ~/ugv_dashboard && npm run dev → http://localhost:5173
+```
+
 #### 터미널 3 — WSL: 키보드 텔레옵 (선택사항)
 
 ```bash
@@ -493,7 +508,7 @@ ugv_roarm_description/
 │   ├── slam.launch.py             # SLAM (Gazebo 시뮬레이션)
 │   ├── slam_real.launch.py        # SLAM (실제 로봇)
 │   ├── nav_real.launch.py         # Nav2 자율주행 (실제 로봇)
-│   ├── rasp_bringup.launch.py     # RPi 하드웨어 드라이버
+│   ├── rasp_bringup.launch.py     # RPi 하드웨어 드라이버 + ugv_bridge
 │   └── remote_view.launch.py      # WSL RViz 뷰어
 ├── scripts/
 │   └── teleop_all.py              # 통합 키보드 텔레옵 노드
@@ -544,7 +559,7 @@ cd ~/ugv_ws
 git pull origin ros2-humble-develop
 cd src/ugv_main/ugv_roarm_description && git pull origin main
 cd ~/ugv_ws
-colcon build --packages-select ugv_bringup rf2o_laser_odometry ugv_roarm_description
+colcon build --packages-select ugv_bringup ugv_bridge rf2o_laser_odometry ugv_roarm_description
 source install/setup.bash
 ```
 
