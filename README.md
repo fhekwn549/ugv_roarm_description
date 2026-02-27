@@ -570,7 +570,6 @@ source install/setup.bash
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
 | `angular_scale` | `2.5` | 회전 속도 배율. 스키드 스티어는 지면 마찰 때문에 높은 토크가 필요합니다 |
-| `steering_bias` | `0.0` | 좌/우 바퀴 저항 차이 보정. 주행 속도에 비례하여 각속도 오프셋 적용 (`angular += bias * linear`). 직진 시 한쪽으로 치우치면 부호/크기 조정 |
 
 > `ugv_driver`는 `cmd_vel`의 `linear.x`를 부호 반전하여 ESP32에 전달합니다 (ESP32 모터 방향이 URDF 규약과 반대).
 
@@ -615,7 +614,7 @@ LiDAR 스캔 매칭 기반 오도메트리. Wave Rover는 인코더가 없으므
 | 팔 관절 움직이면 그리퍼 토크 풀림 | `roarm_driver` 미업데이트 | RPi에서 `ugv_bringup` 리빌드 |
 | roarm_driver SerialException | 시리얼 포트 다중 접근 | 수동 테스트 스크립트 종료 후 launch 재시작 |
 | 바닥에서 제자리 회전 안 됨 | 스키드 스티어 마찰 | `angular_scale` 파라미터 증가 (기본 2.5) |
-| 직진 시 한쪽으로 치우침 | 좌/우 바퀴 저항 차이 | `steering_bias` 파라미터 조정 (rasp_bringup 기본값 0.1) |
+| 직진 시 한쪽으로 치우침 | 좌/우 바퀴 저항 차이 | 모터 교체 또는 하드웨어 점검 |
 | WSL2에서 RViz 크래시 | GPU 호환성 | `LIBGL_ALWAYS_SOFTWARE=1` 환경변수 설정 |
 | 그리퍼 방향 반대 | roarm_driver 버전 불일치 | RPi에서 git pull + 리빌드 |
 | rf2o "Waiting for laser_scans..." 멈춤 | `init_pose_from_topic` 기본값이 존재하지 않는 토픽 | launch에서 `'init_pose_from_topic': ''` 설정 (빈 문자열) |

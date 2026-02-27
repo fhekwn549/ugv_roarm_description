@@ -37,7 +37,7 @@ def generate_launch_description():
         executable='ugv_driver',
         name='ugv_driver',
         output='screen',
-        parameters=[{'steering_bias': 0.1}],
+        parameters=[],
     )
 
     # 4. rf2o_laser_odometry — LiDAR scan-based odometry + odom -> base_footprint TF
